@@ -1,21 +1,23 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 	"golang.org/x/net/html"
-	"regexp"
 )
 
 type Node struct {
-	tag_name     string
-	attributes   map[string]string
-	parent       *Node
-	children     []*Node
+	ID         string            `json:"node_id"`
+	TagName    string            `json:"tag"`
+	Attributes map[string]string `json:"attributes"`
+	Children   []*Node           `json:"children"`
+	Parent     *Node             `json:"-"`
 }
 
 type SelectorPart struct {
@@ -27,17 +29,40 @@ type SelectorPart struct {
 }
 
 type LogEntry struct {
-	Step   int
-	Node   string
-	Action string
+	Step     int    `json:"step"`
+	NodeID   string `json:"node_id"`
+	ParentID string `json:"parent_id"`
+	Depth    int    `json:"depth"`
+	Tag      string `json:"tag"`
+	Action   string `json:"action"`
+	Matched  bool   `json:"matched"`
 }
 
-type SearchResult struct {
-	NodesVisited int
-	TimeTaken    time.Duration
-	MaxDepth     int
-	MatchedNodes []*Node
-	TraversalLog []LogEntry
+type MatchInfo struct {
+	NodeID      string            `json:"node_id"`
+	Tag         string            `json:"tag"`
+	Attributes  map[string]string `json:"attributes"`
+	TextPreview string            `json:"text_preview"`
+	Path        []string          `json:"path"`
+}
+
+type SearchResponse struct {
+	RequestID    string      `json:"request_id"`
+	Selector     string      `json:"selector"`
+	Algorithm    string      `json:"algorithm"`
+	ResultMode   string      `json:"result_mode"`
+	Limit        int         `json:"limit"`
+	Stats        SearchStats `json:"stats"`
+	Matches      []MatchInfo `json:"matches"`
+	DOMTree      *Node       `json:"dom_tree"`
+	TraversalLog []LogEntry  `json:"traversal_log"`
+}
+
+type SearchStats struct {
+	VisitedNodes int     `json:"visited_nodes"`
+	MatchedNodes int     `json:"matched_nodes"`
+	MaxDepth     int     `json:"max_depth"`
+	SearchTimeMS float64 `json:"search_time_ms"`
 }
 
 var void_tags = map[string]bool{
@@ -46,45 +71,35 @@ var void_tags = map[string]bool{
 	"param": true, "source": true, "track": true, "wbr": true,
 }
 
-func fetchHTML(target_url string) (string, error) {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	req, err := http.NewRequest("GET", target_url, nil)
-	if err != nil {
-		return "", fmt.Errorf("gagal membuat request: %v", err)
-	}
-
+func fetchHtml(target_url string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, _ := http.NewRequest("GET", target_url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gagal mengambil data dari URL: %v", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status: %v", resp.Status)
-	}
-
-	body_bytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("gagal membaca body: %v", err)
-	}
-
+	body_bytes, _ := io.ReadAll(resp.Body)
 	return string(body_bytes), nil
 }
 
-func buildDOMTree(html_content string) *Node {
+func buildDomTree(html_content string) *Node {
 	reader := strings.NewReader(html_content)
-	z := html.NewTokenizer(reader)
+	tokenizer := html.NewTokenizer(reader)
+
+	node_counter := 0
+	generate_id := func() string {
+		node_counter++
+		return fmt.Sprintf("n%d", node_counter)
+	}
 
 	root := &Node{
-		tag_name:   "#document",
-		attributes: nil,
-		children:   []*Node{},
-		parent:     nil,
+		ID:       generate_id(),
+		TagName:  "#document",
+		Children: []*Node{},
 	}
 
 	stack := []*Node{root}
@@ -92,429 +107,312 @@ func buildDOMTree(html_content string) *Node {
 	auto_close := func(tag string) {
 		for len(stack) > 1 {
 			top := stack[len(stack)-1]
-
-			if top.tag_name == "li" && tag == "li" {
+			if (top.TagName == "li" && tag == "li") || (top.TagName == "p" && !isInline(tag)) {
 				stack = stack[:len(stack)-1]
 				continue
 			}
-
-			if top.tag_name == "p" {
-				inline := map[string]bool{
-					"a": true, "span": true, "b": true, "i": true,
-					"u": true, "em": true, "strong": true,
-				}
-
-				if !inline[tag] {
-					stack = stack[:len(stack)-1]
-					continue
-				}
-			}
-
 			break
 		}
 	}
 
 	for {
-		tt := z.Next()
+		tt := tokenizer.Next()
 		if tt == html.ErrorToken {
-			if z.Err() == io.EOF {
-				break
-			}
-			fmt.Println("Tokenizer error:", z.Err())
 			break
 		}
-
-		token := z.Token()
+		token := tokenizer.Token()
 
 		switch tt {
-
 		case html.StartTagToken, html.SelfClosingTagToken:
 			tag := strings.ToLower(token.Data)
-
 			auto_close(tag)
 
 			parent := stack[len(stack)-1]
-
 			new_node := &Node{
-				tag_name:   tag,
-				attributes: make(map[string]string),
-				children:   []*Node{},
-				parent:     parent,
+				ID:         generate_id(),
+				TagName:    tag,
+				Attributes: make(map[string]string),
+				Children:   []*Node{},
+				Parent:     parent,
 			}
 
 			for _, attr := range token.Attr {
-				new_node.attributes[attr.Key] = attr.Val
+				new_node.Attributes[attr.Key] = attr.Val
 			}
 
-			parent.children = append(parent.children, new_node)
+			parent.Children = append(parent.Children, new_node)
 
 			if tag == "script" || tag == "style" {
-				for {
-					if z.Next() == html.EndTagToken {
-						endToken := z.Token()
-						if strings.ToLower(endToken.Data) == tag {
-							break
-						}
-					}
+				for tokenizer.Next() != html.EndTagToken || strings.ToLower(tokenizer.Token().Data) != tag {
 				}
 				continue
 			}
 
-			is_void := void_tags[tag] || tt == html.SelfClosingTagToken
-			if !is_void {
+			if !void_tags[tag] && tt != html.SelfClosingTagToken {
 				stack = append(stack, new_node)
 			}
 
 		case html.EndTagToken:
 			tag := strings.ToLower(token.Data)
 			for i := len(stack) - 1; i > 0; i-- {
-				if stack[i].tag_name == tag {
+				if stack[i].TagName == tag {
 					stack = stack[:i]
 					break
 				}
 			}
 		}
 	}
-
 	return root
 }
 
-func printTree(node *Node, depth int) {
-	if node == nil {
-		return
-	}
-
-	indent := strings.Repeat("  ", depth)
-
-	fmt.Printf("%s<%s>", indent, node.tag_name)
-
-	if id, ok := node.attributes["id"]; ok {
-		fmt.Printf(" #%s", id)
-	}
-
-	if class, ok := node.attributes["class"]; ok {
-		classes := strings.Split(class, " ")
-		for _, c := range classes {
-			if c != "" {
-				fmt.Printf(" .%s", c)
-			}
-		}
-	}
-
-	fmt.Println()
-
-	for _, child := range node.children {
-		printTree(child, depth+1)
-	}
+func isInline(tag string) bool {
+	inline := map[string]bool{"a": true, "span": true, "b": true, "i": true, "u": true, "strong": true, "em": true}
+	return inline[tag]
 }
 
-func ParseSingleToken(token string, currentCombinator string) SelectorPart {
-	part := SelectorPart{
-		Classes:    []string{},
-		Attributes: make(map[string]string),
-		Combinator: currentCombinator,
-	}
+func parseSelector(query string) []SelectorPart {
+	query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
+	tokens := strings.Fields(query)
+	var parts []SelectorPart
+	next_comb := ""
 
-	reAttr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
-	attrMatches := reAttr.FindAllStringSubmatch(token, -1)
-	for _, m := range attrMatches {
+	for i, token := range tokens {
+		if token == ">" || token == "+" || token == "~" {
+			next_comb = token
+			continue
+		}
+		if i > 0 && next_comb == "" {
+			next_comb = " "
+		}
+		parts = append(parts, parseSingleToken(token, next_comb))
+		next_comb = ""
+	}
+	return parts
+}
+
+func parseSingleToken(token string, comb string) SelectorPart {
+	part := SelectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
+	
+	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
+	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
 		part.Attributes[m[1]] = m[2]
 	}
-	token = reAttr.ReplaceAllString(token, "") 
+	token = re_attr.ReplaceAllString(token, "")
 
-	reID := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
-	if idMatch := reID.FindStringSubmatch(token); idMatch != nil {
-		part.ID = idMatch[1]
+	re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
+	if m := re_id.FindStringSubmatch(token); m != nil {
+		part.ID = m[1]
 	}
-	token = reID.ReplaceAllString(token, "") 
+	token = re_id.ReplaceAllString(token, "")
 
-	reClass := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
-	classMatches := reClass.FindAllStringSubmatch(token, -1)
-	for _, m := range classMatches {
+	re_class := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
+	for _, m := range re_class.FindAllStringSubmatch(token, -1) {
 		part.Classes = append(part.Classes, m[1])
 	}
-	token = reClass.ReplaceAllString(token, "") 
+	token = re_class.ReplaceAllString(token, "")
 
 	if token != "" && token != "*" {
 		part.Tag = token
 	}
-
 	return part
 }
 
-func ParseSelector(query string) []SelectorPart {
-	query = strings.ReplaceAll(query, ">", " > ")
-	query = strings.ReplaceAll(query, "+", " + ")
-	query = strings.ReplaceAll(query, "~", " ~ ")
-	
-	tokens := strings.Fields(query)
-
-	var parts []SelectorPart
-	nextCombinator := ""
-
-	for i, token := range tokens {
-		if token == ">" || token == "+" || token == "~" {
-			nextCombinator = token
-			continue
-		}
-
-		if i > 0 && nextCombinator == "" {
-			nextCombinator = " "
-		}
-
-		part := ParseSingleToken(token, nextCombinator)
-		parts = append(parts, part)
-
-		nextCombinator = ""
-	}
-
-	return parts
-}
-
-func MatchIdentity(n *Node, part SelectorPart) bool {
-	if part.Tag != "" && part.Tag != "*" && n.tag_name != part.Tag {
+func matchIdentity(n *Node, part SelectorPart) bool {
+	if part.Tag != "" && part.Tag != "*" && n.TagName != part.Tag {
 		return false
 	}
-	if part.ID != "" && n.attributes["id"] != part.ID {
+	if part.ID != "" && n.Attributes["id"] != part.ID {
 		return false
 	}
 	if len(part.Classes) > 0 {
-		nodeClasses := strings.Split(n.attributes["class"], " ")
-		classMap := make(map[string]bool)
-		for _, c := range nodeClasses {
-			classMap[c] = true
-		}
-		for _, requiredClass := range part.Classes {
-			if !classMap[requiredClass] {
-				return false
+		node_classes := strings.Split(n.Attributes["class"], " ")
+		for _, req := range part.Classes {
+			found := false
+			for _, c := range node_classes {
+				if c == req { found = true; break }
 			}
+			if !found { return false }
 		}
 	}
 	for k, v := range part.Attributes {
-		if n.attributes[k] != v {
-			return false
-		}
+		if n.Attributes[k] != v { return false }
 	}
 	return true
 }
 
-func GetPrevSibling(n *Node) *Node {
-	if n.parent == nil {
-		return nil
-	}
-	for i, child := range n.parent.children {
-		if child == n {
-			if i > 0 {
-				return n.parent.children[i-1]
-			}
-			return nil
+func isMatch(n *Node, parts []SelectorPart) bool {
+	if len(parts) == 0 || n == nil { return len(parts) == 0 }
+	curr := parts[len(parts)-1]
+	if !matchIdentity(n, curr) { return false }
+	if len(parts) == 1 { return true }
+
+	rem := parts[:len(parts)-1]
+	switch curr.Combinator {
+	case ">": return isMatch(n.Parent, rem)
+	case " ":
+		for p := n.Parent; p != nil && p.TagName != "#document"; p = p.Parent {
+			if isMatch(p, rem) { return true }
 		}
+	case "+":
+		if prev := getPrevSibling(n); prev != nil { return isMatch(prev, rem) }
+	case "~":
+		for p := getPrevSibling(n); p != nil; p = getPrevSibling(p) {
+			if isMatch(p, rem) { return true }
+		}
+	}
+	return false
+}
+
+func getPrevSibling(n *Node) *Node {
+	if n.Parent == nil { return nil }
+	for i, c := range n.Parent.Children {
+		if c == n && i > 0 { return n.Parent.Children[i-1] }
 	}
 	return nil
 }
 
-func IsMatch(n *Node, parts []SelectorPart) bool {
-	if len(parts) == 0 {
-		return true
+func getNodePath(n *Node) []string {
+	var path []string
+	for curr := n; curr != nil && curr.TagName != "#document"; curr = curr.Parent {
+		path = append([]string{curr.TagName}, path...)
 	}
-	if n == nil {
-		return false
-	}
-
-	currentPart := parts[len(parts)-1]
-
-	if !MatchIdentity(n, currentPart) {
-		return false
-	}
-
-	if len(parts) == 1 {
-		return true
-	}
-
-	remainingParts := parts[:len(parts)-1]
-	combinator := currentPart.Combinator
-
-	switch combinator {
-	case ">":
-		return IsMatch(n.parent, remainingParts)
-		
-	case " ":
-		temp := n.parent
-		for temp != nil && temp.tag_name != "#document" {
-			if IsMatch(temp, remainingParts) {
-				return true
-			}
-			temp = temp.parent
-		}
-		return false
-		
-	case "+": 
-		prev := GetPrevSibling(n)
-		return IsMatch(prev, remainingParts)
-		
-	case "~": 
-		temp := GetPrevSibling(n)
-		for temp != nil {
-			if IsMatch(temp, remainingParts) {
-				return true
-			}
-			temp = GetPrevSibling(temp)
-		}
-		return false
-	}
-
-	return false
+	return path
 }
 
-func SearchBFS(root *Node, parts []SelectorPart, limit int) ([]*Node, []LogEntry) {
-	var results []*Node
+func searchBfs(root *Node, parts []SelectorPart, limit int) ([]MatchInfo, []LogEntry) {
+	var results []MatchInfo
 	var log []LogEntry
-	stepCount := 0
+	type queueItem struct {
+		node  *Node
+		depth int
+	}
+	queue := []queueItem{{root, 0}}
+	step := 0
 
-	queue := []*Node{root}
-
-	for len(queue) > 0 && (limit <= 0 || len(results) < limit) {
-		node := queue[0]
-		queue = queue[1:]
-
-		if node.tag_name != "#document" {
-			stepCount++
-			nodeName := node.tag_name
-			if id := node.attributes["id"]; id != "" { nodeName += "#" + id }
-
-			log = append(log, LogEntry{Step: stepCount, Node: nodeName, Action: "Checking"})
-
-			if IsMatch(node, parts) {
-				results = append(results, node)
-				log[len(log)-1].Action = "Match!"
-			}
+	for len(queue) > 0 {
+		if limit > 0 && len(results) >= limit {
+			break
 		}
 
-		for _, child := range node.children {
-			queue = append(queue, child)
+		curr := queue[0]
+		queue = queue[1:]
+		n, d := curr.node, curr.depth
+
+		if n.TagName != "#document" {
+			step++
+			matched := isMatch(n, parts)
+			parent_id := ""
+			if n.Parent != nil { parent_id = n.Parent.ID }
+
+			entry := LogEntry{step, n.ID, parent_id, d, n.TagName, "visit", matched}
+			if matched {
+				entry.Action = "MATCH FOUND"
+				results = append(results, MatchInfo{n.ID, n.TagName, n.Attributes, "", getNodePath(n)})
+			}
+			log = append(log, entry)
+		}
+
+		for _, child := range n.Children {
+			queue = append(queue, queueItem{child, d + 1})
 		}
 	}
-
 	return results, log
 }
 
-func SearchDFS(node *Node, parts []SelectorPart, limit int, results *[]*Node, log *[]LogEntry, stepCount *int) {
-	if node == nil || (limit > 0 && len(*results) >= limit) {
+func searchDfs(n *Node, parts []SelectorPart, depth int, limit int, step *int, results *[]MatchInfo, log *[]LogEntry) {
+	if n == nil || (limit > 0 && len(*results) >= limit) {
 		return
 	}
 
-	if node.tag_name == "#document" {
-		for _, child := range node.children {
-			SearchDFS(child, parts, limit, results, log, stepCount)
+	if n.TagName != "#document" {
+		*step++
+		matched := isMatch(n, parts)
+		parent_id := ""
+		if n.Parent != nil { parent_id = n.Parent.ID }
+
+		entry := LogEntry{*step, n.ID, parent_id, depth, n.TagName, "visit", matched}
+		if matched {
+			entry.Action = "MATCH FOUND"
+			*results = append(*results, MatchInfo{n.ID, n.TagName, n.Attributes, "", getNodePath(n)})
+			
+			if limit > 0 && len(*results) >= limit {
+				*log = append(*log, entry)
+				return
+			}
 		}
-		return
+		*log = append(*log, entry)
 	}
 
-	*stepCount++
-	
-	nodeName := node.tag_name
-	if id := node.attributes["id"]; id != "" { nodeName += "#" + id }
-
-	*log = append(*log, LogEntry{Step: *stepCount, Node: nodeName, Action: "Checking"})
-
-	if IsMatch(node, parts) {
-		*results = append(*results, node)
-		(*log)[len(*log)-1].Action = "Match!"
-		
-		if limit > 0 && len(*results) >= limit {
-			return
-		}
-	}
-
-	for _, child := range node.children {
-		SearchDFS(child, parts, limit, results, log, stepCount)
+	for _, child := range n.Children {
+		searchDfs(child, parts, depth+1, limit, step, results, log)
 	}
 }
 
-func CalculateMaxDepth(node *Node) int {
-	if node == nil {
-		return 0
+func calculateMaxDepth(n *Node) int {
+	if n == nil { return 0 }
+	max := 0
+	for _, c := range n.Children {
+		d := calculateMaxDepth(c)
+		if d > max { max = d }
 	}
-	maxChildDepth := 0
-	for _, child := range node.children {
-		depth := CalculateMaxDepth(child)
-		if depth > maxChildDepth {
-			maxChildDepth = depth
-		}
-	}
-	return maxChildDepth + 1
+	return max + 1
 }
 
 func main() {
-	// url := "https://en.wikipedia.org/wiki/6-7_meme"
-	// html_content, err := fetchHTML(url)
+	html_content_bytes, err := os.ReadFile("test.txt")
+    if err != nil {
+        fmt.Println("Error reading test.txt:", err)
+        return
+    }
+    html_content := string(html_content_bytes)
 
-	htmlContent, err := os.ReadFile("test.txt")
+	fmt.Println("1. Memulai Parsing DOM Tree...")
+    tree := buildDomTree(html_content)
 
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
+    selector := "main#content .article-body li" 
+    algorithm := "bfs" 
+	result_mode := "top_n" 
+	limit := 3            
+
+	fmt.Printf("2. Menjalankan Pencarian: '%s' menggunakan %s (Mode: %s, Limit: %d)\n", selector, algorithm, result_mode, limit)
+	parts := parseSelector(selector)
+	start := time.Now()
+
+	var matches []MatchInfo
+	var log []LogEntry
+
+	search_limit := 0
+	if result_mode == "top_n" {
+		search_limit = limit
 	}
 
-	html_content := string(htmlContent)
-
-	fmt.Println("Membangun DOM Tree...")
-	tree := buildDOMTree(html_content)
-
-	// fmt.Println("\nMencetak DOM Tree: ")
-	// printTree(tree, 24)
-
-	selectorQuery := "div.mw-parser-output > p"
-	parts := ParseSelector(selectorQuery)
-	limit := 0
-
-	fmt.Printf("\nMenjalankan Pencarian CSS Selector: '%s'\n", selectorQuery)
-
-	startBFS := time.Now()
-	bfsResults, bfsLog := SearchBFS(tree, parts, limit)
-	durBFS := time.Since(startBFS)
-
-	fmt.Printf("\n[Hasil Breadth-First Search (BFS)]\n")
-	fmt.Printf("Waktu Pencarian : %v\n", durBFS)
-	fmt.Printf("Node Dikunjungi : %d node\n", len(bfsLog))
-	fmt.Printf("Banyak Hasil    : %d elemen\n", len(bfsResults))
-	for i, res := range bfsResults {
-		fmt.Printf("  - Match %d: <%s id='%s' class='%s'>\n", i+1, res.tag_name, res.attributes["id"], res.attributes["class"])
+	if algorithm == "bfs" {
+		matches, log = searchBfs(tree, parts, search_limit)
+	} else {
+		step := 0
+		searchDfs(tree, parts, 0, search_limit, &step, &matches, &log)
 	}
 
-	startDFS := time.Now()
-	var dfsResults []*Node
-	var dfsLog []LogEntry
-	stepCount := 0
-	SearchDFS(tree, parts, limit, &dfsResults, &dfsLog, &stepCount)
-	durDFS := time.Since(startDFS)
+	duration := time.Since(start)
 
-	fmt.Printf("\n[Hasil Depth-First Search (DFS)]\n")
-	fmt.Printf("Waktu Pencarian : %v\n", durDFS)
-	fmt.Printf("Node Dikunjungi : %d node\n", len(dfsLog))
-	fmt.Printf("Banyak Hasil    : %d elemen\n", len(dfsResults))
-	for i, res := range dfsResults {
-		fmt.Printf("  - Match %d: <%s id='%s' class='%s'>\n", i+1, res.tag_name, res.attributes["id"], res.attributes["class"])
+	response := SearchResponse{
+		RequestID:  "srch_001",
+		Selector:   selector,
+		Algorithm:  algorithm,
+		ResultMode: result_mode,
+		Limit:      limit,
+		Stats: SearchStats{
+			VisitedNodes: len(log),
+			MatchedNodes: len(matches),
+			MaxDepth:     calculateMaxDepth(tree),
+			SearchTimeMS: float64(duration.Microseconds()) / 1000.0,
+		},
+		Matches:      matches,
+		DOMTree:      tree,
+		TraversalLog: log,
 	}
 
-	maxDepth := CalculateMaxDepth(tree)
-	fmt.Printf("\nKedalaman Maksimum (Max Depth) Pohon DOM: %d\n", maxDepth)
-
-	// fmt.Println("\nTraversal Log BFS: ")
-	// for i := 0; i < len(bfsLog); i++ {
-	// 	if bfsLog[i].Action == "Match!" {
-	// 		fmt.Printf("  %d: Node <%s> : %s\n", dfsLog[i].Step, dfsLog[i].Node, dfsLog[i].Action)
-	// 	} else {
-	// 		fmt.Printf("  %d: Node <%s> : %s\n", dfsLog[i].Step, dfsLog[i].Node, dfsLog[i].Action)
-	// 	}
-	// }
-
-	// fmt.Println("\nTraversal Log DFS: ")
-	// for i := 0; i < len(dfsLog); i++ {
-	// 	if dfsLog[i].Action == "Match!" {
-	// 		fmt.Printf("  %d: Node <%s> : %s\n", dfsLog[i].Step, dfsLog[i].Node, dfsLog[i].Action)
-	// 	} else {
-	// 		fmt.Printf("  %d: Node <%s> : %s\n", dfsLog[i].Step, dfsLog[i].Node, dfsLog[i].Action)
-	// 	}
-	// }
+	json_data, _ := json.MarshalIndent(response, "", "  ")
+	fmt.Println("\n--- FINAL JSON RESPONSE ---")
+	fmt.Println(string(json_data))
 }

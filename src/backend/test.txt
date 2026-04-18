@@ -1,6 +1,50 @@
-<div class="mw-parser-output">
-  <p>A</p>
-  <div>
-    <p>B</p>
-  </div>
-</div>
+<html lang="id">
+<body>
+    <header id="navbar">
+        <nav class="container">
+            <div class="logo">BeritaAI</div>
+            <ul class="nav-links">
+                <li class="item active"><a href="/">Home</a></li>
+                <li class="item"><a href="/news">News</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main id="content" class="container">
+        <section class="main-article">
+            <h1 id="title">Masa Depan AI di Tahun 2026</h1>
+            <p class="meta">Penulis: <span>Admin</span> | 18 April 2026</p>
+            
+            <div class="article-body">
+                <p>Kecerdasan buatan semakin berkembang pesat...</p>
+                <div class="card highlight">
+                    <h3>Poin Penting</h3>
+                    <ul>
+                        <li>Otomatisasi penuh</li>
+                        <li class="special">Pemrosesan Bahasa Alami</li>
+                        <li>Robotika</li>
+                    </ul>
+                </div>
+                <p>Kesimpulannya, kita harus bersiap.</p>
+            </div>
+        </section>
+
+        <aside id="sidebar">
+            <div class="widget trending">
+                <h2>Trending</h2>
+                <ul>
+                    <li><a href="#">Berita 1</a></li>
+                    <li><a href="#">Berita 2</a></li>
+                </ul>
+            </div>
+            <div class="widget ads">
+                <div class="banner">Iklan Disini</div>
+            </div>
+        </aside>
+    </main>
+
+    <footer class="container">
+        <p>&copy; 2026 BeritaAI</p>
+    </footer>
+</body>
+</html>

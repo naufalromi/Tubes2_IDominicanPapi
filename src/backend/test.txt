@@ -1,0 +1,5 @@
+<div>
+  <p>A</p>
+  <p>B</p>
+  <span>C</span>
+</div>

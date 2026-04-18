@@ -1,5 +1,6 @@
-<div>
+<div class="mw-parser-output">
   <p>A</p>
-  <p>B</p>
-  <span>C</span>
+  <div>
+    <p>B</p>
+  </div>
 </div>

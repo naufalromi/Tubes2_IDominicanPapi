@@ -12,15 +12,17 @@ import (
 	"golang.org/x/net/html"
 )
 
-type Node struct {
+type node struct {
 	ID         string            `json:"node_id"`
+	Index      int               `json:"-"`
 	TagName    string            `json:"tag"`
+	Data       string            `json:"data,omitempty"`
 	Attributes map[string]string `json:"attributes"`
-	Children   []*Node           `json:"children"`
-	Parent     *Node             `json:"-"`
+	Children   []*node           `json:"children"`
+	Parent     *node             `json:"-"`
 }
 
-type SelectorPart struct {
+type selectorPart struct {
 	Tag        string
 	ID         string
 	Classes    []string
@@ -28,7 +30,7 @@ type SelectorPart struct {
 	Combinator string
 }
 
-type LogEntry struct {
+type logEntry struct {
 	Step     int    `json:"step"`
 	NodeID   string `json:"node_id"`
 	ParentID string `json:"parent_id"`
@@ -38,7 +40,7 @@ type LogEntry struct {
 	Matched  bool   `json:"matched"`
 }
 
-type MatchInfo struct {
+type matchInfo struct {
 	NodeID      string            `json:"node_id"`
 	Tag         string            `json:"tag"`
 	Attributes  map[string]string `json:"attributes"`
@@ -46,23 +48,30 @@ type MatchInfo struct {
 	Path        []string          `json:"path"`
 }
 
-type SearchResponse struct {
+type searchResponse struct {
 	RequestID    string      `json:"request_id"`
 	Selector     string      `json:"selector"`
 	Algorithm    string      `json:"algorithm"`
 	ResultMode   string      `json:"result_mode"`
 	Limit        int         `json:"limit"`
-	Stats        SearchStats `json:"stats"`
-	Matches      []MatchInfo `json:"matches"`
-	DOMTree      *Node       `json:"dom_tree"`
-	TraversalLog []LogEntry  `json:"traversal_log"`
+	Stats        searchStats `json:"stats"`
+	Matches      []matchInfo `json:"matches"`
+	DOMTree      *node       `json:"dom_tree"`
+	TraversalLog []logEntry  `json:"traversal_log"`
 }
 
-type SearchStats struct {
+type searchStats struct {
 	VisitedNodes int     `json:"visited_nodes"`
 	MatchedNodes int     `json:"matched_nodes"`
 	MaxDepth     int     `json:"max_depth"`
 	SearchTimeMS float64 `json:"search_time_ms"`
+}
+
+type searchState struct {
+	Node         *node
+	TargetIdx    int
+	Depth        int
+	IncomingComb string
 }
 
 var void_tags = map[string]bool{
@@ -73,7 +82,10 @@ var void_tags = map[string]bool{
 
 func fetchHtml(target_url string) (string, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, _ := http.NewRequest("GET", target_url, nil)
+	req, err := http.NewRequest("GET", target_url, nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 
 	resp, err := client.Do(req)
@@ -82,11 +94,14 @@ func fetchHtml(target_url string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body_bytes, _ := io.ReadAll(resp.Body)
+	body_bytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
 	return string(body_bytes), nil
 }
 
-func buildDomTree(html_content string) *Node {
+func buildDomTree(html_content string) *node {
 	reader := strings.NewReader(html_content)
 	tokenizer := html.NewTokenizer(reader)
 
@@ -96,13 +111,13 @@ func buildDomTree(html_content string) *Node {
 		return fmt.Sprintf("n%d", node_counter)
 	}
 
-	root := &Node{
+	root := &node{
 		ID:       generate_id(),
 		TagName:  "#document",
-		Children: []*Node{},
+		Children: []*node{},
 	}
 
-	stack := []*Node{root}
+	stack := []*node{root}
 
 	auto_close := func(tag string) {
 		for len(stack) > 1 {
@@ -128,11 +143,11 @@ func buildDomTree(html_content string) *Node {
 			auto_close(tag)
 
 			parent := stack[len(stack)-1]
-			new_node := &Node{
+			new_node := &node{
 				ID:         generate_id(),
 				TagName:    tag,
 				Attributes: make(map[string]string),
-				Children:   []*Node{},
+				Children:   []*node{},
 				Parent:     parent,
 			}
 
@@ -160,6 +175,35 @@ func buildDomTree(html_content string) *Node {
 					break
 				}
 			}
+
+		case html.TextToken:
+			text_data := strings.TrimSpace(token.Data)
+			if text_data == "" {
+				continue
+			}
+			parent := stack[len(stack)-1]
+			text_node := &node{
+				ID:         generate_id(),
+				TagName:    "#text",
+				Data:       text_data,
+				Attributes: make(map[string]string),
+				Children:   []*node{},
+				Parent:     parent,
+			}
+			parent.Children = append(parent.Children, text_node)
+
+		case html.CommentToken:
+			comment_data := token.Data
+			parent := stack[len(stack)-1]
+			comment_node := &node{
+				ID:         generate_id(),
+				TagName:    "#comment",
+				Data:       comment_data,
+				Attributes: make(map[string]string),
+				Children:   []*node{},
+				Parent:     parent,
+			}
+			parent.Children = append(parent.Children, comment_node)
 		}
 	}
 	return root
@@ -170,10 +214,10 @@ func isInline(tag string) bool {
 	return inline[tag]
 }
 
-func parseSelector(query string) []SelectorPart {
+func parseSelector(query string) []selectorPart {
 	query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
 	tokens := strings.Fields(query)
-	var parts []SelectorPart
+	var parts []selectorPart
 	next_comb := ""
 
 	for i, token := range tokens {
@@ -190,9 +234,9 @@ func parseSelector(query string) []SelectorPart {
 	return parts
 }
 
-func parseSingleToken(token string, comb string) SelectorPart {
-	part := SelectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
-	
+func parseSingleToken(token string, comb string) selectorPart {
+	part := selectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
+
 	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
 	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
 		part.Attributes[m[1]] = m[2]
@@ -217,7 +261,10 @@ func parseSingleToken(token string, comb string) SelectorPart {
 	return part
 }
 
-func matchIdentity(n *Node, part SelectorPart) bool {
+func matchIdentity(n *node, part selectorPart) bool {
+	if n.TagName == "#text" || n.TagName == "#comment" {
+		return false
+	}
 	if part.Tag != "" && part.Tag != "*" && n.TagName != part.Tag {
 		return false
 	}
@@ -229,65 +276,98 @@ func matchIdentity(n *Node, part SelectorPart) bool {
 		for _, req := range part.Classes {
 			found := false
 			for _, c := range node_classes {
-				if c == req { found = true; break }
+				if c == req {
+					found = true
+					break
+				}
 			}
-			if !found { return false }
+			if !found {
+				return false
+			}
 		}
 	}
 	for k, v := range part.Attributes {
-		if n.Attributes[k] != v { return false }
+		if n.Attributes[k] != v {
+			return false
+		}
 	}
 	return true
 }
 
-func isMatch(n *Node, parts []SelectorPart) bool {
-	if len(parts) == 0 || n == nil { return len(parts) == 0 }
-	curr := parts[len(parts)-1]
-	if !matchIdentity(n, curr) { return false }
-	if len(parts) == 1 { return true }
-
-	rem := parts[:len(parts)-1]
-	switch curr.Combinator {
-	case ">": return isMatch(n.Parent, rem)
-	case " ":
-		for p := n.Parent; p != nil && p.TagName != "#document"; p = p.Parent {
-			if isMatch(p, rem) { return true }
-		}
-	case "+":
-		if prev := getPrevSibling(n); prev != nil { return isMatch(prev, rem) }
-	case "~":
-		for p := getPrevSibling(n); p != nil; p = getPrevSibling(p) {
-			if isMatch(p, rem) { return true }
-		}
+func getNextElementSibling(n *node) *node {
+	if n.Parent == nil {
+		return nil
 	}
-	return false
-}
-
-func getPrevSibling(n *Node) *Node {
-	if n.Parent == nil { return nil }
-	for i, c := range n.Parent.Children {
-		if c == n && i > 0 { return n.Parent.Children[i-1] }
+	found_self := false
+	for _, c := range n.Parent.Children {
+		if c == n {
+			found_self = true
+			continue
+		}
+		if found_self && c.TagName != "#text" && c.TagName != "#comment" {
+			return c
+		}
 	}
 	return nil
 }
 
-func getNodePath(n *Node) []string {
+func getNextElementSiblings(n *node) []*node {
+	var siblings []*node
+	if n.Parent == nil {
+		return siblings
+	}
+	found_self := false
+	for _, c := range n.Parent.Children {
+		if c == n {
+			found_self = true
+			continue
+		}
+		if found_self && c.TagName != "#text" && c.TagName != "#comment" {
+			siblings = append(siblings, c)
+		}
+	}
+	return siblings
+}
+
+func extractText(n *node) string {
+	var text_parts []string
+	var extract func(*node)
+
+	extract = func(current_node *node) {
+		for _, c := range current_node.Children {
+			if c.TagName == "#text" {
+				text_parts = append(text_parts, c.Data)
+			} else if c.TagName != "#comment" && c.TagName != "script" && c.TagName != "style" {
+				extract(c)
+			}
+		}
+	}
+	extract(n)
+	return strings.TrimSpace(strings.Join(text_parts, " "))
+}
+
+func getNodePath(n *node) []string {
 	var path []string
 	for curr := n; curr != nil && curr.TagName != "#document"; curr = curr.Parent {
-		path = append([]string{curr.TagName}, path...)
+		step_str := curr.TagName
+		if id, ok := curr.Attributes["id"]; ok && id != "" {
+			step_str += "#" + id
+		} else if cls, ok := curr.Attributes["class"]; ok && cls != "" {
+			classes := strings.Split(strings.TrimSpace(cls), " ")
+			step_str += "." + strings.Join(classes, ".")
+		}
+		path = append([]string{step_str}, path...)
 	}
 	return path
 }
 
-func searchBfs(root *Node, parts []SelectorPart, limit int) ([]MatchInfo, []LogEntry) {
-	var results []MatchInfo
-	var log []LogEntry
-	type queueItem struct {
-		node  *Node
-		depth int
-	}
-	queue := []queueItem{{root, 0}}
+func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+	var results []matchInfo
+	var log []logEntry
 	step := 0
+	visited := make(map[string]bool)
+
+	queue := []searchState{{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}}
 
 	for len(queue) > 0 {
 		if limit > 0 && len(results) >= limit {
@@ -296,90 +376,221 @@ func searchBfs(root *Node, parts []SelectorPart, limit int) ([]MatchInfo, []LogE
 
 		curr := queue[0]
 		queue = queue[1:]
-		n, d := curr.node, curr.depth
+		n := curr.Node
+
+		state_key := fmt.Sprintf("%s_%d", n.ID, curr.TargetIdx)
+		if visited[state_key] {
+			continue
+		}
+		visited[state_key] = true
 
 		if n.TagName != "#document" {
 			step++
-			matched := isMatch(n, parts)
-			parent_id := ""
-			if n.Parent != nil { parent_id = n.Parent.ID }
+			matched := matchIdentity(n, parts[curr.TargetIdx])
+			action := "visit"
 
-			entry := LogEntry{step, n.ID, parent_id, d, n.TagName, "visit", matched}
-			if matched {
-				entry.Action = "MATCH FOUND"
-				results = append(results, MatchInfo{n.ID, n.TagName, n.Attributes, "", getNodePath(n)})
+			if matched && curr.TargetIdx == len(parts)-1 {
+				action = "MATCH FOUND"
+			} else if matched {
+				action = fmt.Sprintf("match part %d", curr.TargetIdx)
 			}
-			log = append(log, entry)
-		}
 
-		for _, child := range n.Children {
-			queue = append(queue, queueItem{child, d + 1})
+			parent_id := ""
+			if n.Parent != nil {
+				parent_id = n.Parent.ID
+			}
+
+			log = append(log, logEntry{step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
+
+			if action == "MATCH FOUND" {
+				results = append(results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+			}
+
+			if n.TagName != "#text" && n.TagName != "#comment" {
+				if matched && curr.TargetIdx < len(parts)-1 {
+					next_comb := parts[curr.TargetIdx+1].Combinator
+					if next_comb == " " || next_comb == ">" {
+						for _, c := range n.Children {
+							queue = append(queue, searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb})
+						}
+					} else if next_comb == "+" {
+						if sibling := getNextElementSibling(n); sibling != nil {
+							queue = append(queue, searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb})
+						}
+					} else if next_comb == "~" {
+						for _, sibling := range getNextElementSiblings(n) {
+							queue = append(queue, searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb})
+						}
+					}
+				} else if !matched {
+					if curr.TargetIdx > 0 && curr.IncomingComb == " " {
+						for _, c := range n.Children {
+							queue = append(queue, searchState{c, curr.TargetIdx, curr.Depth + 1, " "})
+						}
+					} else if curr.TargetIdx > 0 && curr.IncomingComb == "~" {
+						for _, sibling := range getNextElementSiblings(n) {
+							queue = append(queue, searchState{sibling, curr.TargetIdx, curr.Depth, "~"})
+						}
+					}
+				}
+
+				if curr.TargetIdx == 0 {
+					for _, c := range n.Children {
+						queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
+					}
+				}
+			} else {
+				if curr.TargetIdx == 0 {
+					for _, c := range n.Children {
+						queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
+					}
+				}
+			}
+		} else {
+			for _, c := range n.Children {
+				queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
+			}
 		}
 	}
 	return results, log
 }
 
-func searchDfs(n *Node, parts []SelectorPart, depth int, limit int, step *int, results *[]MatchInfo, log *[]LogEntry) {
-	if n == nil || (limit > 0 && len(*results) >= limit) {
+func searchDfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+	var results []matchInfo
+	var log []logEntry
+	step := 0
+	visited := make(map[string]bool)
+
+	searchDfsRecursive(searchState{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}, parts, limit, &step, &results, &log, visited)
+	return results, log
+}
+
+func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step *int, results *[]matchInfo, log *[]logEntry, visited map[string]bool) {
+	if limit > 0 && len(*results) >= limit {
 		return
 	}
 
-	if n.TagName != "#document" {
-		*step++
-		matched := isMatch(n, parts)
-		parent_id := ""
-		if n.Parent != nil { parent_id = n.Parent.ID }
-
-		entry := LogEntry{*step, n.ID, parent_id, depth, n.TagName, "visit", matched}
-		if matched {
-			entry.Action = "MATCH FOUND"
-			*results = append(*results, MatchInfo{n.ID, n.TagName, n.Attributes, "", getNodePath(n)})
-			
-			if limit > 0 && len(*results) >= limit {
-				*log = append(*log, entry)
-				return
-			}
-		}
-		*log = append(*log, entry)
+	n := curr.Node
+	if n == nil {
+		return
 	}
 
-	for _, child := range n.Children {
-		searchDfs(child, parts, depth+1, limit, step, results, log)
+	state_key := fmt.Sprintf("%s_%d", n.ID, curr.TargetIdx)
+	if visited[state_key] {
+		return
+	}
+	visited[state_key] = true
+
+	if n.TagName != "#document" {
+		*step++
+		matched := matchIdentity(n, parts[curr.TargetIdx])
+		action := "visit"
+
+		if matched && curr.TargetIdx == len(parts)-1 {
+			action = "MATCH FOUND"
+		} else if matched {
+			action = fmt.Sprintf("match part %d", curr.TargetIdx)
+		}
+
+		parent_id := ""
+		if n.Parent != nil {
+			parent_id = n.Parent.ID
+		}
+
+		*log = append(*log, logEntry{*step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
+
+		if action == "MATCH FOUND" {
+			*results = append(*results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+		}
+
+		if n.TagName != "#text" && n.TagName != "#comment" {
+			next_comb := ""
+			if curr.TargetIdx < len(parts)-1 {
+				next_comb = parts[curr.TargetIdx+1].Combinator
+			}
+
+			pass_target_next := matched && curr.TargetIdx < len(parts)-1 && (next_comb == " " || next_comb == ">")
+			pass_target_propagate := !matched && curr.TargetIdx > 0 && curr.IncomingComb == " "
+			pass_target_0 := curr.TargetIdx == 0
+
+			for _, c := range n.Children {
+				if pass_target_next {
+					searchDfsRecursive(searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb}, parts, limit, step, results, log, visited)
+				}
+				if pass_target_propagate {
+					searchDfsRecursive(searchState{c, curr.TargetIdx, curr.Depth + 1, " "}, parts, limit, step, results, log, visited)
+				}
+				if pass_target_0 {
+					searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
+				}
+			}
+
+			if matched && curr.TargetIdx < len(parts)-1 {
+				if next_comb == "+" {
+					if sibling := getNextElementSibling(n); sibling != nil {
+						searchDfsRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, limit, step, results, log, visited)
+					}
+				} else if next_comb == "~" {
+					for _, sibling := range getNextElementSiblings(n) {
+						searchDfsRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, limit, step, results, log, visited)
+					}
+				}
+			} else if !matched && curr.TargetIdx > 0 && curr.IncomingComb == "~" {
+				for _, sibling := range getNextElementSiblings(n) {
+					searchDfsRecursive(searchState{sibling, curr.TargetIdx, curr.Depth, "~"}, parts, limit, step, results, log, visited)
+				}
+			}
+
+		} else {
+			if curr.TargetIdx == 0 {
+				for _, c := range n.Children {
+					searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
+				}
+			}
+		}
+	} else {
+		for _, c := range n.Children {
+			searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
+		}
 	}
 }
 
-func calculateMaxDepth(n *Node) int {
-	if n == nil { return 0 }
+func calculateMaxDepth(n *node) int {
+	if n == nil {
+		return 0
+	}
 	max := 0
 	for _, c := range n.Children {
 		d := calculateMaxDepth(c)
-		if d > max { max = d }
+		if d > max {
+			max = d
+		}
 	}
 	return max + 1
 }
 
 func main() {
 	html_content_bytes, err := os.ReadFile("test.txt")
-    if err != nil {
-        fmt.Println("Error reading test.txt:", err)
-        return
-    }
-    html_content := string(html_content_bytes)
+	if err != nil {
+		fmt.Println("Error reading test.txt:", err)
+		return
+	}
+	html_content := string(html_content_bytes)
 
-	fmt.Println("1. Memulai Parsing DOM Tree...")
-    tree := buildDomTree(html_content)
+	fmt.Println("Memulai Parsing DOM Tree...")
+	tree := buildDomTree(html_content)
 
-    selector := "main#content .article-body li" 
-    algorithm := "bfs" 
-	result_mode := "top_n" 
-	limit := 3            
+	selector := "main#content .article-body > section ~ div.box.target > span.badge"
+	algorithm := "dfs"
+	result_mode := "top_n"
+	limit := 3
 
-	fmt.Printf("2. Menjalankan Pencarian: '%s' menggunakan %s (Mode: %s, Limit: %d)\n", selector, algorithm, result_mode, limit)
+	fmt.Printf("Menjalankan Pencarian: '%s' menggunakan %s (Mode: %s, Limit: %d)\n", selector, strings.ToUpper(algorithm), result_mode, limit)
 	parts := parseSelector(selector)
 	start := time.Now()
 
-	var matches []MatchInfo
-	var log []LogEntry
+	var matches []matchInfo
+	var log []logEntry
 
 	search_limit := 0
 	if result_mode == "top_n" {
@@ -389,19 +600,18 @@ func main() {
 	if algorithm == "bfs" {
 		matches, log = searchBfs(tree, parts, search_limit)
 	} else {
-		step := 0
-		searchDfs(tree, parts, 0, search_limit, &step, &matches, &log)
+		matches, log = searchDfs(tree, parts, search_limit)
 	}
 
 	duration := time.Since(start)
 
-	response := SearchResponse{
+	response := searchResponse{
 		RequestID:  "srch_001",
 		Selector:   selector,
 		Algorithm:  algorithm,
 		ResultMode: result_mode,
 		Limit:      limit,
-		Stats: SearchStats{
+		Stats: searchStats{
 			VisitedNodes: len(log),
 			MatchedNodes: len(matches),
 			MaxDepth:     calculateMaxDepth(tree),
@@ -413,6 +623,6 @@ func main() {
 	}
 
 	json_data, _ := json.MarshalIndent(response, "", "  ")
-	fmt.Println("\n--- FINAL JSON RESPONSE ---")
+	fmt.Println("\nHasil JSON:")
 	fmt.Println(string(json_data))
 }

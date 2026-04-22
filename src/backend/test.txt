@@ -1,50 +1,40 @@
-<html lang="id">
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Engine LTR</title>
+</head>
 <body>
-    <header id="navbar">
-        <nav class="container">
-            <div class="logo">BeritaAI</div>
-            <ul class="nav-links">
-                <li class="item active"><a href="/">Home</a></li>
-                <li class="item"><a href="/news">News</a></li>
-            </ul>
-        </nav>
-    </header>
-
-    <main id="content" class="container">
-        <section class="main-article">
-            <h1 id="title">Masa Depan AI di Tahun 2026</h1>
-            <p class="meta">Penulis: <span>Admin</span> | 18 April 2026</p>
+    <main id="content">
+        <div class="article-body">
             
-            <div class="article-body">
-                <p>Kecerdasan buatan semakin berkembang pesat...</p>
-                <div class="card highlight">
-                    <h3>Poin Penting</h3>
-                    <ul>
-                        <li>Otomatisasi penuh</li>
-                        <li class="special">Pemrosesan Bahasa Alami</li>
-                        <li>Robotika</li>
-                    </ul>
-                </div>
-                <p>Kesimpulannya, kita harus bersiap.</p>
-            </div>
-        </section>
+            <h1>Judul Artikel</h1>
+            
+            <p id="p-intro">Ini adalah paragraf pengantar. <span>Teks tebal</span> ada di sini.</p>
 
-        <aside id="sidebar">
-            <div class="widget trending">
-                <h2>Trending</h2>
+            <section class="list-section">
+                <h2>Daftar Penting</h2>
                 <ul>
-                    <li><a href="#">Berita 1</a></li>
-                    <li><a href="#">Berita 2</a></li>
+                    <li id="item-1" class="active">Satu</li>
+                    <li id="item-2">Dua</li>
+                    <li id="item-3">Tiga</li>
                 </ul>
-            </div>
-            <div class="widget ads">
-                <div class="banner">Iklan Disini</div>
-            </div>
-        </aside>
-    </main>
+                <p class="note">Catatan di bawah daftar.</p>
+            </section>
 
-    <footer class="container">
-        <p>&copy; 2026 BeritaAI</p>
-    </footer>
+            <div class="box">
+                <p>Paragraf di dalam box biasa.</p>
+            </div>
+
+            <div class="box target">
+                <p>Paragraf di dalam box target.</p>
+                <span class="badge">Baru</span>
+            </div>
+
+            <p id="p-closing">Paragraf penutup di luar box.</p>
+            <span class="badge">Lama</span>
+            <span class="badge">Kuno</span>
+
+        </div>
+    </main>
 </body>
 </html>

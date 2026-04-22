@@ -239,7 +239,8 @@ func parseSingleToken(token string, comb string) selectorPart {
 
 	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
 	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
-		part.Attributes[m[1]] = m[2]
+		cleaned := strings.Trim(m[2], `"'`) 
+    	part.Attributes[m[1]] = cleaned
 	}
 	token = re_attr.ReplaceAllString(token, "")
 
@@ -256,7 +257,7 @@ func parseSingleToken(token string, comb string) selectorPart {
 	token = re_class.ReplaceAllString(token, "")
 
 	if token != "" && token != "*" {
-		part.Tag = token
+		part.Tag = strings.ToLower(token)
 	}
 	return part
 }

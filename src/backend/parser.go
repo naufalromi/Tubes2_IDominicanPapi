@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
 	"golang.org/x/net/html"
 )
 
@@ -80,6 +82,11 @@ var void_tags = map[string]bool{
 	"param": true, "source": true, "track": true, "wbr": true,
 }
 
+var tin []int
+var tout []int
+var timer int
+var up [][]*node
+
 func fetchHtml(target_url string) (string, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", target_url, nil)
@@ -113,6 +120,7 @@ func buildDomTree(html_content string) *node {
 
 	root := &node{
 		ID:       generate_id(),
+		Index:    node_counter - 1,
 		TagName:  "#document",
 		Children: []*node{},
 	}
@@ -145,6 +153,7 @@ func buildDomTree(html_content string) *node {
 			parent := stack[len(stack)-1]
 			new_node := &node{
 				ID:         generate_id(),
+				Index:      node_counter - 1,
 				TagName:    tag,
 				Attributes: make(map[string]string),
 				Children:   []*node{},
@@ -239,8 +248,8 @@ func parseSingleToken(token string, comb string) selectorPart {
 
 	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
 	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
-		cleaned := strings.Trim(m[2], `"'`) 
-    	part.Attributes[m[1]] = cleaned
+		cleaned := strings.Trim(m[2], `"'`)
+		part.Attributes[m[1]] = cleaned
 	}
 	token = re_attr.ReplaceAllString(token, "")
 
@@ -570,8 +579,64 @@ func calculateMaxDepth(n *node) int {
 	return max + 1
 }
 
+func countNodes(root *node) int {
+	if root == nil {
+		return 0
+	}
+	count := 1
+	for _, c := range root.Children {
+		count += countNodes(c)
+	}
+	return count
+}
+
+func dfsLCA(n1 *node, n2 *node, logN int) {
+	timer++
+	tin[n1.Index] = timer
+	up[n1.Index][0] = n2
+	for i := 1; i < logN; i++ {
+		up[n1.Index][i] = up[up[n1.Index][i-1].Index][i-1]
+	}
+	for _, c := range n1.Children {
+		if c != n2 {
+			dfsLCA(c, n1, logN)
+		}
+	}
+	tout[n1.Index] = timer
+}
+
+func is_ancestor(u *node, v *node) bool {
+	return tin[u.Index] <= tin[v.Index] && tout[u.Index] >= tout[v.Index]
+}
+
+func LCA(u *node, v *node, logN int) *node {
+	if is_ancestor(u, v) {
+		return u
+	}
+	if is_ancestor(v, u) {
+		return v
+	}
+	for i := logN - 1; i >= 0; i-- {
+		if !is_ancestor(up[u.Index][i], v) {
+			u = up[u.Index][i]
+		}
+	}
+	return up[u.Index][0]
+}
+func preprocessLCA(root *node) {
+	n := countNodes(root)
+	tin = make([]int, n)
+	tout = make([]int, n)
+	timer = 0
+	logN := int(math.Ceil(math.Log2(float64(n))))
+	up = make([][]*node, n)
+	for i := range up {
+		up[i] = make([]*node, logN)
+	}
+	dfsLCA(root, root, logN)
+}
 func main() {
-	html_content_bytes, err := os.ReadFile("test.txt")
+	html_content_bytes, err := os.ReadFile("test1.txt")
 	if err != nil {
 		fmt.Println("Error reading test.txt:", err)
 		return
@@ -626,4 +691,7 @@ func main() {
 	json_data, _ := json.MarshalIndent(response, "", "  ")
 	fmt.Println("\nHasil JSON:")
 	fmt.Println(string(json_data))
+
+	preprocessLCA(tree)
+	// lcaLogN := int(math.Ceil(math.Log2(float64(treeLength))))
 }

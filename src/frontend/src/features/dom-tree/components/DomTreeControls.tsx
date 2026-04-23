@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 type DomTreeControlsProps = {
   onZoomIn: () => void
   onZoomOut: () => void
@@ -30,7 +32,7 @@ function DomTreeControls({
   hasAnimationStarted,
   isPaused,
 }: DomTreeControlsProps) {
-  const baseButtonStyle: React.CSSProperties = {
+  const baseButtonStyle: CSSProperties = {
     padding: '10px 16px',
     borderRadius: '10px',
     border: '1px solid #333',
@@ -42,7 +44,7 @@ function DomTreeControls({
     minWidth: '110px',
   }
 
-  const disabledButtonStyle: React.CSSProperties = {
+  const disabledButtonStyle: CSSProperties = {
     opacity: 0.5,
     cursor: 'not-allowed',
   }

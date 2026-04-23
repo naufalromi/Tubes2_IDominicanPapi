@@ -1,18 +1,19 @@
 import StatCard from './StatCard'
 import type { TraversalStats } from '../types'
+import { formatDuration } from '../../../utils/format'
 
 type StatsPanelProps = {
   stats?: TraversalStats
 }
 
-const demoStats: TraversalStats = {
-  maxDepth: 8,
-  nodesVisited: 142,
-  traversalTimeMs: 12.4,
-  matchesFound: 6,
+const emptyStats: TraversalStats = {
+  maxDepth: 0,
+  nodesVisited: 0,
+  traversalTimeMs: 0,
+  matchesFound: 0,
 }
 
-function StatsPanel({ stats = demoStats }: StatsPanelProps) {
+function StatsPanel({ stats = emptyStats }: StatsPanelProps) {
   return (
     <section
       style={{
@@ -54,7 +55,7 @@ function StatsPanel({ stats = demoStats }: StatsPanelProps) {
       >
         <StatCard label="Max Depth" value={stats.maxDepth} />
         <StatCard label="Nodes Visited" value={stats.nodesVisited} />
-        <StatCard label="Traversal Time" value={`${stats.traversalTimeMs} ms`} />
+        <StatCard label="Traversal Time" value={formatDuration(stats.traversalTimeMs)} />
         <StatCard label="Matches Found" value={stats.matchesFound} />
       </div>
     </section>

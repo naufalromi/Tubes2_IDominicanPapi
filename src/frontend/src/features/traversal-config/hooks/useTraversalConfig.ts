@@ -1,60 +1,16 @@
-import { useState } from 'react'
-import type {
-  InputSource,
-  ResultMode,
-  TraversalAlgorithm,
-  TraversalConfigState,
-} from '../types'
-
-const initialState: TraversalConfigState = {
-  inputSource: 'url',
-  url: '',
-  html: '',
-  algorithm: 'bfs',
-  selector: '',
-  resultMode: 'all',
-  topN: 5,
-}
+import { traversalStoreActions, useTraversalStore } from '../../../store/traversalStore'
 
 export function useTraversalConfig() {
-  const [config, setConfig] = useState<TraversalConfigState>(initialState)
-
-  const setInputSource = (inputSource: InputSource) => {
-    setConfig((prev) => ({ ...prev, inputSource }))
-  }
-
-  const setUrl = (url: string) => {
-    setConfig((prev) => ({ ...prev, url }))
-  }
-
-  const setHtml = (html: string) => {
-    setConfig((prev) => ({ ...prev, html }))
-  }
-
-  const setAlgorithm = (algorithm: TraversalAlgorithm) => {
-    setConfig((prev) => ({ ...prev, algorithm }))
-  }
-
-  const setSelector = (selector: string) => {
-    setConfig((prev) => ({ ...prev, selector }))
-  }
-
-  const setResultMode = (resultMode: ResultMode) => {
-    setConfig((prev) => ({ ...prev, resultMode }))
-  }
-
-  const setTopN = (topN: number) => {
-    setConfig((prev) => ({ ...prev, topN }))
-  }
+  const config = useTraversalStore((state) => state.config)
+  const status = useTraversalStore((state) => state.status)
+  const error = useTraversalStore((state) => state.error)
+  const requestId = useTraversalStore((state) => state.requestId)
 
   return {
     config,
-    setInputSource,
-    setUrl,
-    setHtml,
-    setAlgorithm,
-    setSelector,
-    setResultMode,
-    setTopN,
+    status,
+    error,
+    requestId,
+    ...traversalStoreActions,
   }
 }

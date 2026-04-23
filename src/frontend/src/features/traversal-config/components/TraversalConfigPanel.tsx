@@ -18,10 +18,14 @@ function TraversalConfigPanel() {
     setSelector,
     setResultMode,
     setTopN,
+    startTraversal,
+    status,
+    error,
+    requestId,
   } = useTraversalConfig()
 
   const handleStartTraversal = () => {
-    console.log('Traversal config:', config)
+    void startTraversal()
   }
 
   return (
@@ -55,7 +59,42 @@ function TraversalConfigPanel() {
       )}
 
       <div style={{ marginTop: '8px' }}>
-        <StartTraversalButton onClick={handleStartTraversal} />
+        <StartTraversalButton
+          onClick={handleStartTraversal}
+          disabled={status === 'loading'}
+          isLoading={status === 'loading'}
+        />
+      </div>
+
+      {error && (
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: '12px',
+            border: '1px solid #7f1d1d',
+            backgroundColor: '#2b1111',
+            color: '#fca5a5',
+            fontSize: '13px',
+            lineHeight: 1.5,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div
+        style={{
+          padding: '12px 14px',
+          borderRadius: '12px',
+          border: '1px solid #2a2a2a',
+          backgroundColor: '#151515',
+          color: '#a1a1aa',
+          fontSize: '13px',
+          lineHeight: 1.6,
+        }}
+      >
+        <div>Status: {status}</div>
+        <div>Last Request: {requestId ?? 'No traversal has run yet'}</div>
       </div>
     </div>
   )

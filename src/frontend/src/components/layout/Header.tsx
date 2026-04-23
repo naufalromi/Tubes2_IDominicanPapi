@@ -1,4 +1,21 @@
+import Badge from '../ui/Badge'
+import { useTraversalStore } from '../../store/traversalStore'
+
 function Header() {
+  const status = useTraversalStore((state) => state.status)
+  const requestId = useTraversalStore((state) => state.requestId)
+
+  const badgeVariant =
+    status === 'success' ? 'green' : status === 'loading' ? 'blue' : 'gray'
+  const statusLabel =
+    status === 'loading'
+      ? 'Searching'
+      : status === 'success'
+        ? 'Results Ready'
+        : status === 'error'
+          ? 'Needs Attention'
+          : 'Idle'
+
   return (
     <header
       style={{
@@ -20,14 +37,15 @@ function Header() {
 
       <div
         style={{
-          padding: '6px 12px',
-          border: '1px solid #3a3a3a',
-          borderRadius: '999px',
-          fontSize: '12px',
-          color: '#ccc',
+          display: 'grid',
+          justifyItems: 'end',
+          gap: '8px',
         }}
       >
-        TUBES 2
+        <Badge variant={badgeVariant}>{statusLabel}</Badge>
+        <div style={{ fontSize: '12px', color: '#888' }}>
+          {requestId ? `Request ${requestId}` : 'Awaiting first traversal'}
+        </div>
       </div>
     </header>
   )

@@ -35,14 +35,14 @@ export function buildNodePath(node: DomNode | null, targetId: string): string[] 
   if (!node) return []
 
   if (node.id === targetId) {
-    return [node.label]
+    return node.tag === '#document' ? [] : [node.label]
   }
 
   for (const child of node.children) {
     const childPath = buildNodePath(child, targetId)
 
     if (childPath.length > 0) {
-      return [node.label, ...childPath]
+      return node.tag === '#document' ? childPath : [node.label, ...childPath]
     }
   }
 

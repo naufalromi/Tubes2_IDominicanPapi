@@ -1,4 +1,13 @@
+import DomTreeCanvas from '../../features/dom-tree/components/DomTreeCanvas'
+import { useTraversalStore } from '../../store/traversalStore'
+
 function MainPanel() {
+  const tree = useTraversalStore((state) => state.tree)
+  const matches = useTraversalStore((state) => state.matches)
+  const traversalPath = useTraversalStore((state) => state.traversalPath)
+  const status = useTraversalStore((state) => state.status)
+  const error = useTraversalStore((state) => state.error)
+
   return (
     <main
       style={{
@@ -9,29 +18,28 @@ function MainPanel() {
         boxSizing: 'border-box',
       }}
     >
-      <div
-        style={{
-          height: '100%',
-          minHeight: '500px',
-          border: '1px solid #2a2a2a',
-          borderRadius: '16px',
-          backgroundColor: '#121212',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#777',
-          textAlign: 'center',
-          padding: '24px',
-          boxSizing: 'border-box',
-        }}
-      >
-        <div>
-          <h2 style={{ marginTop: 0, marginBottom: '8px', color: 'white' }}>
-            No DOM Tree Loaded
-          </h2>
-          <p style={{ margin: 0 }}>
-            Enter a URL or HTML content and start traversal to visualize the DOM tree
-          </p>
+      <div style={{ display: 'grid', gap: '16px', height: '100%' }}>
+        {(status === 'loading' || error) && (
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '14px',
+              border: error ? '1px solid #7f1d1d' : '1px solid #1d4ed8',
+              backgroundColor: error ? '#2b1111' : '#0f1b36',
+              color: error ? '#fca5a5' : '#bfdbfe',
+              fontSize: '14px',
+            }}
+          >
+            {error ?? 'Traversal is running. The DOM tree, logs, and results will update when it finishes.'}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }}>
+          <DomTreeCanvas
+            tree={tree}
+            traversalPath={traversalPath}
+            matchedNodeIds={matches.map((match) => match.id)}
+          />
         </div>
       </div>
     </main>
@@ -39,106 +47,3 @@ function MainPanel() {
 }
 
 export default MainPanel
-
-
-
-
-
-// import DomTreeCanvas from '../../features/dom-tree/components/DomTreeCanvas'
-// import type { DomTreeNodeData } from '../../features/dom-tree/types'
-
-// const dummyTree: DomTreeNodeData = {
-//   id: 'n1',
-//   tag: 'html',
-//   depth: 0,
-//   label: 'html',
-//   children: [
-//     {
-//       id: 'n2',
-//       tag: 'body',
-//       depth: 1,
-//       label: 'body',
-//       children: [
-//         {
-//           id: 'n3',
-//           tag: 'div',
-//           depth: 2,
-//           label: 'div#main',
-//           children: [
-//             {
-//               id: 'n4',
-//               tag: 'section',
-//               depth: 3,
-//               label: 'section.content',
-//               children: [
-//                 {
-//                   id: 'n5',
-//                   tag: 'div',
-//                   depth: 4,
-//                   label: 'div.card',
-//                   children: [
-//                     {
-//                       id: 'n6',
-//                       tag: 'span',
-//                       depth: 5,
-//                       label: 'span',
-//                       children: [],
-//                     },
-//                   ],
-//                 },
-//                 {
-//                   id: 'n7',
-//                   tag: 'div',
-//                   depth: 4,
-//                   label: 'div.card',
-//                   children: [
-//                     {
-//                       id: 'n8',
-//                       tag: 'span',
-//                       depth: 5,
-//                       label: 'span',
-//                       children: [],
-//                     },
-//                   ],
-//                 },
-//               ],
-//             },
-//             {
-//               id: 'n9',
-//               tag: 'footer',
-//               depth: 3,
-//               label: 'footer',
-//               children: [],
-//             },
-//           ],
-//         },
-//       ],
-//     },
-//   ],
-// }
-
-// const dummyTraversalPath = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6']
-
-// const dummyMatchedNodeIds = ['n6']
-
-// function MainPanel() {
-//   return (
-//     <main
-//       style={{
-//         flex: 1,
-//         backgroundColor: '#0f0f0f',
-//         padding: '20px',
-//         color: 'white',
-//         boxSizing: 'border-box',
-//       }}
-//     >
-//       <DomTreeCanvas
-//         tree={dummyTree}
-//         traversalPath={dummyTraversalPath}
-//         matchedNodeIds={dummyMatchedNodeIds}
-//       />
-//     </main>
-//   )
-// }
-
-// export default MainPanel

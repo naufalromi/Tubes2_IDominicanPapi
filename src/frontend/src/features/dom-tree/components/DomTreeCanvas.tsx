@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import DomTreeControls from './DomTreeControls'
 import DomTreeLegend from './DomTreeLegend'
 import DomTreeNode from './DomTreeNode'
@@ -60,6 +60,15 @@ function DomTreeCanvas({
     return () => window.clearTimeout(timer)
   }, [isAnimating, isPaused, animationStep, animationSpeed, traversalPath])
 
+  useEffect(() => {
+    setHasAnimationStarted(false)
+    setIsAnimating(false)
+    setIsPaused(false)
+    setAnimationStep(0)
+    setScale(1)
+    setOffset({ x: 0, y: 0 })
+  }, [tree, traversalPath])
+
   if (!tree) {
     return <EmptyDomState />
   }
@@ -106,7 +115,7 @@ function DomTreeCanvas({
     setAnimationStep(0)
   }
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseDown = (e: MouseEvent<HTMLDivElement>) => {
     dragRef.current = {
       dragging: true,
       startX: e.clientX,
@@ -116,7 +125,7 @@ function DomTreeCanvas({
     }
   }
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
     if (!dragRef.current.dragging) return
 
     const dx = e.clientX - dragRef.current.startX
@@ -136,7 +145,7 @@ function DomTreeCanvas({
     dragRef.current.dragging = false
   }
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+  const handleWheel = (e: WheelEvent<HTMLDivElement>) => {
     e.preventDefault()
     e.stopPropagation()
 

@@ -18,6 +18,7 @@ import {
   isLikelyValidSelector,
   normalizeSelector,
 } from '../utils/selector'
+import { normalizeHtmlInput } from '../utils/html'
 
 export type TraversalStatus = 'idle' | 'loading' | 'success' | 'error'
 
@@ -161,7 +162,7 @@ function buildTraversalRequest(config: TraversalConfigState): TraversalRequest {
     }
   }
 
-  const html = config.html.trim()
+  const html = normalizeHtmlInput(config.html)
 
   if (html.length === 0) {
     throw new Error('Please paste HTML content before starting traversal.')

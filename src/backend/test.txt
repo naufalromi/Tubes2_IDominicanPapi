@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Engine LTR</title>
+</head>
+<body>
+    <main id="content">
+        <div class="article-body">
+            
+            <h1>Judul Artikel</h1>
+            
+            <p id="p-intro">Ini adalah paragraf pengantar. <span>Teks tebal</span> ada di sini.</p>
+
+            <section class="list-section">
+                <h2>Daftar Penting</h2>
+                <ul>
+                    <li id="item-1" class="active">Satu</li>
+                    <li id="item-2">Dua</li>
+                    <li id="item-3">Tiga</li>
+                </ul>
+                <p class="note">Catatan di bawah daftar.</p>
+            </section>
+
+            <div class="box">
+                <p>Paragraf di dalam box biasa.</p>
+            </div>
+
+            <div class="box target">
+                <p>Paragraf di dalam box target.</p>
+                <span class="badge">Baru</span>
+            </div>
+
+            <p id="p-closing">Paragraf penutup di luar box.</p>
+            <span class="badge">Lama</span>
+            <span class="badge">Kuno</span>
+
+        </div>
+    </main>
+</body>
+</html>

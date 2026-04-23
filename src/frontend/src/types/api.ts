@@ -52,7 +52,7 @@ export type BackendDomNode = {
   tag: string
   data?: string
   attributes: Record<string, string>
-  children: BackendDomNode[]
+  children: BackendDomNode[] | null
 }
 
 export type BackendTraversalLogEntry = {
@@ -70,7 +70,7 @@ export type BackendMatchInfo = {
   tag: string
   attributes: Record<string, string>
   text_preview: string
-  path: string[]
+  path: string[] | null
 }
 
 export type BackendSearchResponse = {
@@ -89,8 +89,8 @@ export type BackendSearchResponse = {
     max_depth: number
     search_time_ms: number
   }
-  matches: BackendMatchInfo[]
-  traversal_path: string[]
+  matches: BackendMatchInfo[] | null
+  traversal_path: string[] | null
   dom_tree?: BackendDomNode | null
-  traversal_log?: BackendTraversalLogEntry[]
+  traversal_log?: BackendTraversalLogEntry[] | null
 }

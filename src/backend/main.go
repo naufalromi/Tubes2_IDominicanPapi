@@ -394,8 +394,8 @@ func getNodePath(n *node) []string {
 }
 
 func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
-	var results []matchInfo
-	var log []logEntry
+	results := make([]matchInfo, 0)
+	log := make([]logEntry, 0)
 	step := 0
 	visited := make(map[string]bool)
 
@@ -488,8 +488,8 @@ func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logE
 }
 
 func searchDfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
-	var results []matchInfo
-	var log []logEntry
+	results := make([]matchInfo, 0)
+	log := make([]logEntry, 0)
 	step := 0
 	visited := make(map[string]bool)
 
@@ -706,8 +706,8 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	parts := parseSelector(req_data.Selector)
 	start := time.Now()
 
-	var matches []matchInfo
-	var log []logEntry
+	matches := make([]matchInfo, 0)
+	log := make([]logEntry, 0)
 
 	search_limit := 0
 	if req_data.ResultMode == "top_n" {
@@ -722,7 +722,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	duration := time.Since(start)
 
-	var traversal_path []string
+	traversal_path := make([]string, 0, len(log))
 	for _, entry := range log {
 		traversal_path = append(traversal_path, entry.NodeID)
 	}
@@ -732,7 +732,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		res_tree = tree
 	}
 
-	var res_log []logEntry
+	res_log := make([]logEntry, 0)
 	if req_data.IncludeLog {
 		res_log = log
 	}

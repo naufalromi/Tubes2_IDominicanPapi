@@ -33,6 +33,8 @@ function buildDomNodeLabel(node: Pick<BackendDomNode, 'tag' | 'attributes' | 'da
 }
 
 function adaptDomNode(node: BackendDomNode, depth = 0): DomNode {
+  const children = node.children ?? []
+
   return {
     id: node.node_id,
     tag: node.tag,
@@ -40,7 +42,7 @@ function adaptDomNode(node: BackendDomNode, depth = 0): DomNode {
     depth,
     attributes: node.attributes,
     textContent: node.data?.trim() || undefined,
-    children: node.children.map((child) => adaptDomNode(child, depth + 1)),
+    children: children.map((child) => adaptDomNode(child, depth + 1)),
   }
 }
 
@@ -90,16 +92,16 @@ function adaptMatches(
   tree: DomNode | null,
   matches: BackendSearchResponse['matches'],
 ): TraversalMatch[] {
-  return matches.map((match) => {
+  return (matches ?? []).map((match) => {
     const node = findNodeById(tree, match.node_id)
-    const path = resolveNodePath(tree, match.node_id, match.path)
+    const path = resolveNodePath(tree, match.node_id, match.path ?? [])
 
     return {
       id: match.node_id,
       tag: match.tag,
       label: node?.label ?? formatNodeLabel(match.tag, match.attributes),
       path,
-      depth: Math.max(match.path.length - 1, node?.depth ?? 0),
+      depth: Math.max((match.path ?? []).length - 1, node?.depth ?? 0),
       attributes: match.attributes,
       textPreview: match.text_preview ? truncateText(match.text_preview, 120) : undefined,
     }
@@ -108,9 +110,9 @@ function adaptMatches(
 
 function adaptLogs(
   tree: DomNode | null,
-  logs: BackendSearchResponse['traversal_log'] = [],
+  logs: BackendSearchResponse['traversal_log'],
 ): TraversalLogEntry[] {
-  return logs.map((entry) => {
+  return (logs ?? []).map((entry) => {
     const node = findNodeById(tree, entry.node_id)
     const nodeLabel = node?.label ?? formatNodeLabel(entry.tag)
     const path = resolveNodePath(tree, entry.node_id)
@@ -166,6 +168,6 @@ export function adaptTraversalResponse(response: BackendSearchResponse): Travers
     stats,
     logs,
     matches,
-    traversalPath: response.traversal_path,
+    traversalPath: response.traversal_path ?? [],
   }
 }

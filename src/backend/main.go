@@ -6,7 +6,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -50,16 +49,23 @@ type matchInfo struct {
 	Path        []string          `json:"path"`
 }
 
+type sourceInfo struct {
+	Type        string `json:"type"`
+	ResolvedURL string `json:"resolved_url,omitempty"`
+}
+
 type searchResponse struct {
-	RequestID    string      `json:"request_id"`
-	Selector     string      `json:"selector"`
-	Algorithm    string      `json:"algorithm"`
-	ResultMode   string      `json:"result_mode"`
-	Limit        int         `json:"limit"`
-	Stats        searchStats `json:"stats"`
-	Matches      []matchInfo `json:"matches"`
-	DOMTree      *node       `json:"dom_tree"`
-	TraversalLog []logEntry  `json:"traversal_log"`
+	RequestID     string      `json:"request_id"`
+	SourceInfo    sourceInfo  `json:"source_info"`
+	Selector      string      `json:"selector"`
+	Algorithm     string      `json:"algorithm"`
+	ResultMode    string      `json:"result_mode"`
+	Limit         int         `json:"limit,omitempty"`
+	Stats         searchStats `json:"stats"`
+	Matches       []matchInfo `json:"matches"`
+	TraversalPath []string    `json:"traversal_path"`
+	DOMTree       *node       `json:"dom_tree,omitempty"`
+	TraversalLog  []logEntry  `json:"traversal_log,omitempty"`
 }
 
 type searchStats struct {
@@ -76,12 +82,28 @@ type searchState struct {
 	IncomingComb string
 }
 
+type source struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type searchRequest struct {
+	Source      source `json:"source"`
+	Algorithm   string `json:"algorithm"`
+	Selector    string `json:"selector"`
+	ResultMode  string `json:"result_mode"`
+	Limit       int    `json:"limit"`
+	IncludeTree bool   `json:"include_tree"`
+	IncludeLog  bool   `json:"include_log"`
+}
+
 var void_tags = map[string]bool{
 	"area": true, "base": true, "br": true, "col": true, "embed": true,
 	"hr": true, "img": true, "input": true, "link": true, "meta": true,
 	"param": true, "source": true, "track": true, "wbr": true,
 }
 
+// Variabel Global untuk LCA
 var tin []int
 var tout []int
 var timer int
@@ -605,24 +627,25 @@ func dfsLCA(n1 *node, n2 *node, logN int) {
 	tout[n1.Index] = timer
 }
 
-func is_ancestor(u *node, v *node) bool {
+func isAncestor(u *node, v *node) bool {
 	return tin[u.Index] <= tin[v.Index] && tout[u.Index] >= tout[v.Index]
 }
 
 func LCA(u *node, v *node, logN int) *node {
-	if is_ancestor(u, v) {
+	if isAncestor(u, v) {
 		return u
 	}
-	if is_ancestor(v, u) {
+	if isAncestor(v, u) {
 		return v
 	}
 	for i := logN - 1; i >= 0; i-- {
-		if !is_ancestor(up[u.Index][i], v) {
+		if !isAncestor(up[u.Index][i], v) {
 			u = up[u.Index][i]
 		}
 	}
 	return up[u.Index][0]
 }
+
 func preprocessLCA(root *node) {
 	n := countNodes(root)
 	tin = make([]int, n)
@@ -635,35 +658,63 @@ func preprocessLCA(root *node) {
 	}
 	dfsLCA(root, root, logN)
 }
-func main() {
-	html_content_bytes, err := os.ReadFile("test1.txt")
-	if err != nil {
-		fmt.Println("Error reading test.txt:", err)
+
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+	(*w).Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+}
+
+func handleSearch(w http.ResponseWriter, r *http.Request) {
+	enableCors(&w)
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
-	html_content := string(html_content_bytes)
 
-	fmt.Println("Memulai Parsing DOM Tree...")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Metode tidak diizinkan. Gunakan POST.", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req_data searchRequest
+	err := json.NewDecoder(r.Body).Decode(&req_data)
+	if err != nil {
+		http.Error(w, "Gagal memparsing JSON dari request", http.StatusBadRequest)
+		return
+	}
+
+	var html_content string
+	source_info := sourceInfo{Type: req_data.Source.Type}
+
+	if req_data.Source.Type == "url" {
+		html_content, err = fetchHtml(req_data.Source.Value)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Gagal mengambil HTML dari URL: %v", err), http.StatusInternalServerError)
+			return
+		}
+		source_info.ResolvedURL = req_data.Source.Value
+	} else if req_data.Source.Type == "html" {
+		html_content = req_data.Source.Value
+	} else {
+		http.Error(w, "Tipe source tidak valid. Gunakan 'url' atau 'html'.", http.StatusBadRequest)
+		return
+	}
+
 	tree := buildDomTree(html_content)
-
-	selector := "main#content .article-body > section ~ div.box.target > span.badge"
-	algorithm := "dfs"
-	result_mode := "top_n"
-	limit := 3
-
-	fmt.Printf("Menjalankan Pencarian: '%s' menggunakan %s (Mode: %s, Limit: %d)\n", selector, strings.ToUpper(algorithm), result_mode, limit)
-	parts := parseSelector(selector)
+	parts := parseSelector(req_data.Selector)
 	start := time.Now()
 
 	var matches []matchInfo
 	var log []logEntry
 
 	search_limit := 0
-	if result_mode == "top_n" {
-		search_limit = limit
+	if req_data.ResultMode == "top_n" {
+		search_limit = req_data.Limit
 	}
 
-	if algorithm == "bfs" {
+	if req_data.Algorithm == "bfs" {
 		matches, log = searchBfs(tree, parts, search_limit)
 	} else {
 		matches, log = searchDfs(tree, parts, search_limit)
@@ -671,27 +722,54 @@ func main() {
 
 	duration := time.Since(start)
 
+	var traversal_path []string
+	for _, entry := range log {
+		traversal_path = append(traversal_path, entry.NodeID)
+	}
+
+	var res_tree *node
+	if req_data.IncludeTree {
+		res_tree = tree
+	}
+
+	var res_log []logEntry
+	if req_data.IncludeLog {
+		res_log = log
+	}
+
 	response := searchResponse{
-		RequestID:  "srch_001",
-		Selector:   selector,
-		Algorithm:  algorithm,
-		ResultMode: result_mode,
-		Limit:      limit,
+		RequestID:     fmt.Sprintf("srch_%d", time.Now().Unix()),
+		SourceInfo:    source_info,
+		Selector:      req_data.Selector,
+		Algorithm:     req_data.Algorithm,
+		ResultMode:    req_data.ResultMode,
+		Limit:         req_data.Limit,
 		Stats: searchStats{
 			VisitedNodes: len(log),
 			MatchedNodes: len(matches),
 			MaxDepth:     calculateMaxDepth(tree),
 			SearchTimeMS: float64(duration.Microseconds()) / 1000.0,
 		},
-		Matches:      matches,
-		DOMTree:      tree,
-		TraversalLog: log,
+		Matches:       matches,
+		TraversalPath: traversal_path,
+		DOMTree:       res_tree,
+		TraversalLog:  res_log,
 	}
 
-	json_data, _ := json.MarshalIndent(response, "", "  ")
-	fmt.Println("\nHasil JSON:")
-	fmt.Println(string(json_data))
+	// preprocessLCA(tree)
 
-	preprocessLCA(tree)
-	// lcaLogN := int(math.Ceil(math.Log2(float64(treeLength))))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func main() {
+	http.HandleFunc("/api/search", handleSearch)
+
+	port := ":8080"
+	fmt.Printf("Server berjalan di http://localhost%s\n", port)
+	
+	err := http.ListenAndServe(port, nil)
+	if err != nil {
+		fmt.Println("Server gagal dijalankan:", err)
+	}
 }

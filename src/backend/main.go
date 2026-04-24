@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
+	"os"
 	"golang.org/x/net/html"
 )
 
@@ -245,52 +245,76 @@ func isInline(tag string) bool {
 	return inline[tag]
 }
 
-func parseSelector(query string) []selectorPart {
-	query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
-	tokens := strings.Fields(query)
-	var parts []selectorPart
-	next_comb := ""
+func parseSelector(query string) ([]selectorPart, error) {
+    query = strings.TrimSpace(query)
+    if query == "" {
+        return nil, fmt.Errorf("selector cannot be empty")
+    }
 
-	for i, token := range tokens {
-		if token == ">" || token == "+" || token == "~" {
-			next_comb = token
-			continue
-		}
-		if i > 0 && next_comb == "" {
-			next_comb = " "
-		}
-		parts = append(parts, parseSingleToken(token, next_comb))
-		next_comb = ""
-	}
-	return parts
+    query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
+    tokens := strings.Fields(query)
+    
+    var parts []selectorPart
+    next_comb := ""
+
+    for i, token := range tokens {
+        if token == ">" || token == "+" || token == "~" {
+            if i == 0 || i == len(tokens)-1 {
+                return nil, fmt.Errorf("combinator '%s' cannot be at the start or end", token)
+            }
+            next_comb = token
+            continue
+        }
+        
+        if i > 0 && next_comb == "" {
+            next_comb = " "
+        }
+
+        part, err := parseSingleToken(token, next_comb)
+        if err != nil {
+            return nil, err 
+        }
+        
+        parts = append(parts, part)
+        next_comb = ""
+    }
+    return parts, nil
 }
 
-func parseSingleToken(token string, comb string) selectorPart {
-	part := selectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
+func parseSingleToken(token string, comb string) (selectorPart, error) {
+    part := selectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
 
-	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
-	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
-		cleaned := strings.Trim(m[2], `"'`)
-		part.Attributes[m[1]] = cleaned
-	}
-	token = re_attr.ReplaceAllString(token, "")
+    originalToken := token
 
-	re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
-	if m := re_id.FindStringSubmatch(token); m != nil {
-		part.ID = m[1]
-	}
-	token = re_id.ReplaceAllString(token, "")
+    re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
+    token = re_attr.ReplaceAllString(token, "")
 
-	re_class := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
-	for _, m := range re_class.FindAllStringSubmatch(token, -1) {
-		part.Classes = append(part.Classes, m[1])
-	}
-	token = re_class.ReplaceAllString(token, "")
+    re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
+    if strings.Contains(token, "#") && !re_id.MatchString(originalToken) {
+        return part, fmt.Errorf("invalid ID selector: '%s'", originalToken)
+    }
+    if m := re_id.FindStringSubmatch(originalToken); m != nil {
+        part.ID = m[1]
+    }
+    token = re_id.ReplaceAllString(token, "")
 
-	if token != "" && token != "*" {
-		part.Tag = strings.ToLower(token)
-	}
-	return part
+    re_class := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
+    if strings.Contains(token, ".") && !re_class.MatchString(originalToken) {
+        return part, fmt.Errorf("invalid Class selector: '%s'", originalToken)
+    }
+    for _, m := range re_class.FindAllStringSubmatch(originalToken, -1) {
+        part.Classes = append(part.Classes, m[1])
+    }
+    token = re_class.ReplaceAllString(token, "")
+
+    if token != "" && token != "*" {
+        if !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(token) {
+            return part, fmt.Errorf("invalid Tag name: '%s'", token)
+        }
+        part.Tag = strings.ToLower(token)
+    }
+
+    return part, nil
 }
 
 func matchIdentity(n *node, part selectorPart) bool {
@@ -454,15 +478,11 @@ func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logE
 							queue = append(queue, searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb})
 						}
 					}
-				} else if !matched {
-					if curr.TargetIdx > 0 && curr.IncomingComb == " " {
-						for _, c := range n.Children {
-							queue = append(queue, searchState{c, curr.TargetIdx, curr.Depth + 1, " "})
-						}
-					} else if curr.TargetIdx > 0 && curr.IncomingComb == "~" {
-						for _, sibling := range getNextElementSiblings(n) {
-							queue = append(queue, searchState{sibling, curr.TargetIdx, curr.Depth, "~"})
-						}
+				}
+
+				if curr.TargetIdx > 0 && curr.IncomingComb == " " {
+					for _, c := range n.Children {
+						queue = append(queue, searchState{c, curr.TargetIdx, curr.Depth + 1, " "})
 					}
 				}
 
@@ -478,6 +498,7 @@ func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logE
 					}
 				}
 			}
+
 		} else {
 			for _, c := range n.Children {
 				queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
@@ -542,7 +563,7 @@ func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step 
 			}
 
 			pass_target_next := matched && curr.TargetIdx < len(parts)-1 && (next_comb == " " || next_comb == ">")
-			pass_target_propagate := !matched && curr.TargetIdx > 0 && curr.IncomingComb == " "
+			pass_target_propagate := curr.TargetIdx > 0 && curr.IncomingComb == " " // <-- Hapus syarat !matched
 			pass_target_0 := curr.TargetIdx == 0
 
 			for _, c := range n.Children {
@@ -567,10 +588,6 @@ func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step 
 						searchDfsRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, limit, step, results, log, visited)
 					}
 				}
-			} else if !matched && curr.TargetIdx > 0 && curr.IncomingComb == "~" {
-				for _, sibling := range getNextElementSiblings(n) {
-					searchDfsRecursive(searchState{sibling, curr.TargetIdx, curr.Depth, "~"}, parts, limit, step, results, log, visited)
-				}
 			}
 
 		} else {
@@ -580,6 +597,7 @@ func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step 
 				}
 			}
 		}
+
 	} else {
 		for _, c := range n.Children {
 			searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
@@ -697,13 +715,28 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		source_info.ResolvedURL = req_data.Source.Value
 	} else if req_data.Source.Type == "html" {
 		html_content = req_data.Source.Value
+	} else if req_data.Source.Type == "file" {
+		html_content_bytes, err := os.ReadFile(req_data.Source.Value)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Gagal membaca file lokal: %v", err), http.StatusInternalServerError)
+			return
+		}
+		html_content = string(html_content_bytes)
 	} else {
 		http.Error(w, "Tipe source tidak valid. Gunakan 'url' atau 'html'.", http.StatusBadRequest)
 		return
 	}
 
 	tree := buildDomTree(html_content)
-	parts := parseSelector(req_data.Selector)
+	parts, err := parseSelector(req_data.Selector)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Selector Error: " + err.Error(),
+		})
+		return
+	}
 	start := time.Now()
 
 	matches := make([]matchInfo, 0)
@@ -738,12 +771,12 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := searchResponse{
-		RequestID:     fmt.Sprintf("srch_%d", time.Now().Unix()),
-		SourceInfo:    source_info,
-		Selector:      req_data.Selector,
-		Algorithm:     req_data.Algorithm,
-		ResultMode:    req_data.ResultMode,
-		Limit:         req_data.Limit,
+		RequestID:  fmt.Sprintf("srch_%d", time.Now().Unix()),
+		SourceInfo: source_info,
+		Selector:   req_data.Selector,
+		Algorithm:  req_data.Algorithm,
+		ResultMode: req_data.ResultMode,
+		Limit:      req_data.Limit,
 		Stats: searchStats{
 			VisitedNodes: len(log),
 			MatchedNodes: len(matches),
@@ -767,7 +800,7 @@ func main() {
 
 	port := ":8080"
 	fmt.Printf("Server berjalan di http://localhost%s\n", port)
-	
+
 	err := http.ListenAndServe(port, nil)
 	if err != nil {
 		fmt.Println("Server gagal dijalankan:", err)

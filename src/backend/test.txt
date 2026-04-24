@@ -1,40 +1,117 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <title>Test Engine LTR</title>
-</head>
-<body>
-    <main id="content">
-        <div class="article-body">
-            
-            <h1>Judul Artikel</h1>
-            
-            <p id="p-intro">Ini adalah paragraf pengantar. <span>Teks tebal</span> ada di sini.</p>
+<html lang="en">
+<body class="theme-dark admin-panel">
+  <aside id="sidebar" class="sidebar-layout">
+    <ul class="nav-menu">
+      <li class="nav-item active" data-id="home"><a href="#">Home</a></li>
+      <li class="nav-item">
+        <a href="#">Settings</a>
+        <ul class="sub-menu">
+          <li class="sub-item"><span class="icon"></span>Profile</li>
+          <li class="sub-item target-node">Security</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
 
-            <section class="list-section">
-                <h2>Daftar Penting</h2>
-                <ul>
-                    <li id="item-1" class="active">Satu</li>
-                    <li id="item-2">Dua</li>
-                    <li id="item-3">Tiga</li>
-                </ul>
-                <p class="note">Catatan di bawah daftar.</p>
-            </section>
+  <main id="main-content">
+    <header>
+      <h2>Dashboard</h2>
+      <div class="user-info">
+        <img src="avatar.png" alt="User">
+        <span class="badge role-admin" data-role="admin">Admin</span>
+      </div>
+    </header>
 
-            <div class="box">
-                <p>Paragraf di dalam box biasa.</p>
-            </div>
-
-            <div class="box target">
-                <p>Paragraf di dalam box target.</p>
-                <span class="badge">Baru</span>
-            </div>
-
-            <p id="p-closing">Paragraf penutup di luar box.</p>
-            <span class="badge">Lama</span>
-            <span class="badge">Kuno</span>
-
+    <section class="widget-grid">
+      <article class="widget data-widget" id="sales-widget">
+        <div class="widget-header"><h3>Sales</h3></div>
+        <div class="widget-body">
+          <table class="data-table">
+            <tbody>
+              <tr class="row"><td class="cell">Q1</td><td class="cell value">1500</td></tr>
+              <tr class="row highlight"><td class="cell">Q2</td><td class="cell value target-value">3200</td></tr>
+            </tbody>
+          </table>
         </div>
-    </main>
+      </article>
+
+      <article class="widget form-widget">
+        <form id="config-form">
+          <div class="form-group">
+            <label>API Key</label>
+            
+            <input type="text" class="input-control hidden-key" value="secret_key">
+            <span class="help-text">Do not share this.</span>
+          </div>
+          
+          <div class="form-group">
+            <input type="checkbox" id="enable-logs" checked>
+            <label for="enable-logs">Enable Logging</label>
+          </div>
+          
+          <button type="submit" class="btn btn-primary" data-action="save">Save Changes</button>
+        </form>
+      </article>
+    </section>
+  </main>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<body class="theme-dark admin-panel">
+  <aside id="sidebar" class="sidebar-layout">
+    <ul class="nav-menu">
+      <li class="nav-item active" data-id="home"><a href="#">Home</a></li>
+      <li class="nav-item">
+        <a href="#">Settings</a>
+        <ul class="sub-menu">
+          <li class="sub-item"><span class="icon"></span>Profile</li>
+          <li class="sub-item target-node">Security</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+
+  <main id="main-content">
+    <header>
+      <h2>Dashboard</h2>
+      <div class="user-info">
+        <img src="avatar.png" alt="User">
+        <span class="badge role-admin" data-role="admin">Admin</span>
+      </div>
+    </header>
+
+    <section class="widget-grid">
+      <article class="widget data-widget" id="sales-widget">
+        <div class="widget-header"><h3>Sales</h3></div>
+        <div class="widget-body">
+          <table class="data-table">
+            <tbody>
+              <tr class="row"><td class="cell">Q1</td><td class="cell value">1500</td></tr>
+              <tr class="row highlight"><td class="cell">Q2</td><td class="cell value target-value">3200</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="widget form-widget">
+        <form id="config-form">
+          <div class="form-group">
+            <label>API Key</label>
+            
+            <input type="text" class="input-control hidden-key" value="secret_key">
+            <span class="help-text">Do not share this.</span>
+          </div>
+          
+          <div class="form-group">
+            <input type="checkbox" id="enable-logs" checked>
+            <label for="enable-logs">Enable Logging</label>
+          </div>
+          
+          <button type="submit" class="btn btn-primary" data-action="save">Save Changes</button>
+        </form>
+      </article>
+    </section>
+  </main>
 </body>
 </html>

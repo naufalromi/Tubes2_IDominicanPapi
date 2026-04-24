@@ -24,6 +24,11 @@ type node struct {
 	Parent     *node             `json:"-"`
 }
 
+type pathNode struct {
+	NodeID     string `json:"node_id"`
+	Descriptor string `json:"descriptor"`
+}
+
 type selectorPart struct {
 	Tag        string
 	ID         string
@@ -47,7 +52,7 @@ type matchInfo struct {
 	Tag         string            `json:"tag"`
 	Attributes  map[string]string `json:"attributes"`
 	TextPreview string            `json:"text_preview"`
-	Path        []string          `json:"path"`
+	Path        []pathNode        `json:"path"`
 }
 
 type sourceInfo struct {
@@ -412,8 +417,8 @@ func extractText(n *node) string {
 	return strings.TrimSpace(strings.Join(text_parts, " "))
 }
 
-func getNodePath(n *node) []string {
-	var path []string
+func getNodePath(n *node) []pathNode {
+	var path []pathNode
 	for curr := n; curr != nil && curr.TagName != "#document"; curr = curr.Parent {
 		step_str := curr.TagName
 		if id, ok := curr.Attributes["id"]; ok && id != "" {
@@ -422,7 +427,12 @@ func getNodePath(n *node) []string {
 			classes := strings.Split(strings.TrimSpace(cls), " ")
 			step_str += "." + strings.Join(classes, ".")
 		}
-		path = append([]string{step_str}, path...)
+		
+		current_step := pathNode{
+			NodeID:     curr.ID,
+			Descriptor: step_str,
+		}
+		path = append([]pathNode{current_step}, path...)
 	}
 	return path
 }

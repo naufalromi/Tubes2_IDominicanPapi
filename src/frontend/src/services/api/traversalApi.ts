@@ -4,7 +4,8 @@ import {
   adaptTraversalResponse,
 } from '../adapters/traversalAdapter'
 
-const SEARCH_ENDPOINT = 'http://localhost:8080/api/search'
+const SEARCH_ENDPOINT =
+  import.meta.env.VITE_SEARCH_ENDPOINT ?? 'http://localhost:8080/api/search'
 
 async function extractErrorMessage(response: Response): Promise<string> {
   const message = await response.text()

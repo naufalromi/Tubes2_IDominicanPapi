@@ -6,10 +6,11 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
-	"os"
 	"golang.org/x/net/html"
 )
 
@@ -97,13 +98,22 @@ type searchRequest struct {
 	IncludeLog  bool   `json:"include_log"`
 }
 
+type searchTask struct {
+	mu      sync.Mutex 
+	wg      sync.WaitGroup 
+	visited map[string]bool
+	results []matchInfo
+	log     []logEntry
+	step    int
+	limit   int
+}
+
 var void_tags = map[string]bool{
 	"area": true, "base": true, "br": true, "col": true, "embed": true,
 	"hr": true, "img": true, "input": true, "link": true, "meta": true,
 	"param": true, "source": true, "track": true, "wbr": true,
 }
 
-// Variabel Global untuk LCA
 var tin []int
 var tout []int
 var timer int
@@ -246,75 +256,75 @@ func isInline(tag string) bool {
 }
 
 func parseSelector(query string) ([]selectorPart, error) {
-    query = strings.TrimSpace(query)
-    if query == "" {
-        return nil, fmt.Errorf("selector cannot be empty")
-    }
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("selector cannot be empty")
+	}
 
-    query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
-    tokens := strings.Fields(query)
-    
-    var parts []selectorPart
-    next_comb := ""
+	query = regexp.MustCompile(`\s*([>+~])\s*`).ReplaceAllString(query, " $1 ")
+	tokens := strings.Fields(query)
+	
+	var parts []selectorPart
+	next_comb := ""
 
-    for i, token := range tokens {
-        if token == ">" || token == "+" || token == "~" {
-            if i == 0 || i == len(tokens)-1 {
-                return nil, fmt.Errorf("combinator '%s' cannot be at the start or end", token)
-            }
-            next_comb = token
-            continue
-        }
-        
-        if i > 0 && next_comb == "" {
-            next_comb = " "
-        }
+	for i, token := range tokens {
+		if token == ">" || token == "+" || token == "~" {
+			if i == 0 || i == len(tokens)-1 {
+				return nil, fmt.Errorf("combinator '%s' cannot be at the start or end", token)
+			}
+			next_comb = token
+			continue
+		}
+		
+		if i > 0 && next_comb == "" {
+			next_comb = " "
+		}
 
-        part, err := parseSingleToken(token, next_comb)
-        if err != nil {
-            return nil, err 
-        }
-        
-        parts = append(parts, part)
-        next_comb = ""
-    }
-    return parts, nil
+		part, err := parseSingleToken(token, next_comb)
+		if err != nil {
+			return nil, err 
+		}
+		
+		parts = append(parts, part)
+		next_comb = ""
+	}
+	return parts, nil
 }
 
 func parseSingleToken(token string, comb string) (selectorPart, error) {
-    part := selectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
+	part := selectorPart{Classes: []string{}, Attributes: make(map[string]string), Combinator: comb}
 
-    originalToken := token
+	original_token := token
 
-    re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
-    token = re_attr.ReplaceAllString(token, "")
+	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
+	token = re_attr.ReplaceAllString(token, "")
 
-    re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
-    if strings.Contains(token, "#") && !re_id.MatchString(originalToken) {
-        return part, fmt.Errorf("invalid ID selector: '%s'", originalToken)
-    }
-    if m := re_id.FindStringSubmatch(originalToken); m != nil {
-        part.ID = m[1]
-    }
-    token = re_id.ReplaceAllString(token, "")
+	re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
+	if strings.Contains(token, "#") && !re_id.MatchString(original_token) {
+		return part, fmt.Errorf("invalid ID selector: '%s'", original_token)
+	}
+	if m := re_id.FindStringSubmatch(original_token); m != nil {
+		part.ID = m[1]
+	}
+	token = re_id.ReplaceAllString(token, "")
 
-    re_class := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
-    if strings.Contains(token, ".") && !re_class.MatchString(originalToken) {
-        return part, fmt.Errorf("invalid Class selector: '%s'", originalToken)
-    }
-    for _, m := range re_class.FindAllStringSubmatch(originalToken, -1) {
-        part.Classes = append(part.Classes, m[1])
-    }
-    token = re_class.ReplaceAllString(token, "")
+	re_class := regexp.MustCompile(`\.([a-zA-Z0-9_-]+)`)
+	if strings.Contains(token, ".") && !re_class.MatchString(original_token) {
+		return part, fmt.Errorf("invalid Class selector: '%s'", original_token)
+	}
+	for _, m := range re_class.FindAllStringSubmatch(original_token, -1) {
+		part.Classes = append(part.Classes, m[1])
+	}
+	token = re_class.ReplaceAllString(token, "")
 
-    if token != "" && token != "*" {
-        if !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(token) {
-            return part, fmt.Errorf("invalid Tag name: '%s'", token)
-        }
-        part.Tag = strings.ToLower(token)
-    }
+	if token != "" && token != "*" {
+		if !regexp.MustCompile(`^[a-zA-Z0-9-]+$`).MatchString(token) {
+			return part, fmt.Errorf("invalid Tag name: '%s'", token)
+		}
+		part.Tag = strings.ToLower(token)
+	}
 
-    return part, nil
+	return part, nil
 }
 
 func matchIdentity(n *node, part selectorPart) bool {
@@ -508,6 +518,146 @@ func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logE
 	return results, log
 }
 
+func searchBfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+	task := &searchTask{
+		visited: make(map[string]bool),
+		results: make([]matchInfo, 0),
+		log:     make([]logEntry, 0),
+		limit:   limit,
+	}
+
+	queue := []searchState{{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}}
+
+	for len(queue) > 0 {
+		task.mu.Lock()
+		if task.limit > 0 && len(task.results) >= task.limit {
+			task.mu.Unlock()
+			break
+		}
+		task.mu.Unlock()
+
+		var next_queue []searchState
+		var wg sync.WaitGroup
+
+		for _, curr := range queue {
+			wg.Add(1)
+			
+			go func(currState searchState) {
+				defer wg.Done()
+
+				task.mu.Lock()
+				if task.limit > 0 && len(task.results) >= task.limit {
+					task.mu.Unlock()
+					return
+				}
+				task.mu.Unlock()
+
+				n := currState.Node
+				if n == nil {
+					return
+				}
+
+				state_key := fmt.Sprintf("%s_%d", n.ID, currState.TargetIdx)
+				
+				task.mu.Lock()
+				if task.visited[state_key] {
+					task.mu.Unlock()
+					return
+				}
+				task.visited[state_key] = true
+				task.mu.Unlock()
+
+				var local_next []searchState
+
+				if n.TagName != "#document" {
+					task.mu.Lock()
+					task.step++
+					current_step := task.step
+					task.mu.Unlock()
+
+					matched := matchIdentity(n, parts[currState.TargetIdx])
+					action := "visit"
+
+					if matched && currState.TargetIdx == len(parts)-1 {
+						action = "MATCH FOUND"
+					} else if matched {
+						action = fmt.Sprintf("match part %d", currState.TargetIdx)
+					}
+
+					parent_id := ""
+					if n.Parent != nil {
+						parent_id = n.Parent.ID
+					}
+
+					task.mu.Lock()
+					task.log = append(task.log, logEntry{current_step, n.ID, parent_id, currState.Depth, n.TagName, action, matched})
+					if action == "MATCH FOUND" {
+						task.results = append(task.results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+					}
+					task.mu.Unlock()
+
+					if n.TagName != "#text" && n.TagName != "#comment" {
+						next_comb := ""
+						if currState.TargetIdx < len(parts)-1 {
+							next_comb = parts[currState.TargetIdx+1].Combinator
+						}
+
+						if matched && currState.TargetIdx < len(parts)-1 {
+							if next_comb == " " || next_comb == ">" {
+								for _, c := range n.Children {
+									local_next = append(local_next, searchState{c, currState.TargetIdx + 1, currState.Depth + 1, next_comb})
+								}
+							} else if next_comb == "+" {
+								if sibling := getNextElementSibling(n); sibling != nil {
+									local_next = append(local_next, searchState{sibling, currState.TargetIdx + 1, currState.Depth, next_comb})
+								}
+							} else if next_comb == "~" {
+								for _, sibling := range getNextElementSiblings(n) {
+									local_next = append(local_next, searchState{sibling, currState.TargetIdx + 1, currState.Depth, next_comb})
+								}
+							}
+						}
+
+						if currState.TargetIdx > 0 && currState.IncomingComb == " " {
+							for _, c := range n.Children {
+								local_next = append(local_next, searchState{c, currState.TargetIdx, currState.Depth + 1, " "})
+							}
+						}
+
+						if currState.TargetIdx == 0 {
+							for _, c := range n.Children {
+								local_next = append(local_next, searchState{c, 0, currState.Depth + 1, ""})
+							}
+						}
+					} else {
+						if currState.TargetIdx == 0 {
+							for _, c := range n.Children {
+								local_next = append(local_next, searchState{c, 0, currState.Depth + 1, ""})
+							}
+						}
+					}
+				} else {
+					for _, c := range n.Children {
+						local_next = append(local_next, searchState{c, 0, currState.Depth + 1, ""})
+					}
+				}
+
+				if len(local_next) > 0 {
+					task.mu.Lock()
+					next_queue = append(next_queue, local_next...)
+					task.mu.Unlock()
+				}
+			}(curr)
+		}
+
+		wg.Wait()
+
+		queue = next_queue
+	}
+
+	return task.results, task.log
+}
+
 func searchDfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
 	results := make([]matchInfo, 0)
 	log := make([]logEntry, 0)
@@ -563,7 +713,7 @@ func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step 
 			}
 
 			pass_target_next := matched && curr.TargetIdx < len(parts)-1 && (next_comb == " " || next_comb == ">")
-			pass_target_propagate := curr.TargetIdx > 0 && curr.IncomingComb == " " // <-- Hapus syarat !matched
+			pass_target_propagate := curr.TargetIdx > 0 && curr.IncomingComb == " "
 			pass_target_0 := curr.TargetIdx == 0
 
 			for _, c := range n.Children {
@@ -604,6 +754,131 @@ func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step 
 		}
 	}
 }
+
+func searchDfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+	task := &searchTask{
+		visited: make(map[string]bool),
+		results: make([]matchInfo, 0),
+		log:     make([]logEntry, 0),
+		limit:   limit,
+	}
+
+	task.wg.Add(1)
+	go searchDfsRecursiveConcurrent(searchState{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}, parts, task)
+
+	task.wg.Wait()
+
+	return task.results, task.log
+}
+
+func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *searchTask) {
+	defer task.wg.Done() 
+
+	task.mu.Lock()
+	if task.limit > 0 && len(task.results) >= task.limit {
+		task.mu.Unlock()
+		return
+	}
+	task.mu.Unlock()
+
+	n := curr.Node
+	if n == nil {
+		return
+	}
+
+	state_key := fmt.Sprintf("%s_%d", n.ID, curr.TargetIdx)
+	
+	task.mu.Lock()
+	if task.visited[state_key] {
+		task.mu.Unlock()
+		return
+	}
+	task.visited[state_key] = true
+	task.mu.Unlock()
+
+	if n.TagName != "#document" {
+		task.mu.Lock()
+		task.step++
+		current_step := task.step
+		task.mu.Unlock()
+
+		matched := matchIdentity(n, parts[curr.TargetIdx])
+		action := "visit"
+
+		if matched && curr.TargetIdx == len(parts)-1 {
+			action = "MATCH FOUND"
+		} else if matched {
+			action = fmt.Sprintf("match part %d", curr.TargetIdx)
+		}
+
+		parent_id := ""
+		if n.Parent != nil {
+			parent_id = n.Parent.ID
+		}
+
+		task.mu.Lock()
+		task.log = append(task.log, logEntry{current_step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
+		if action == "MATCH FOUND" {
+			task.results = append(task.results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+		}
+		task.mu.Unlock()
+
+		if n.TagName != "#text" && n.TagName != "#comment" {
+			next_comb := ""
+			if curr.TargetIdx < len(parts)-1 {
+				next_comb = parts[curr.TargetIdx+1].Combinator
+			}
+
+			pass_target_next := matched && curr.TargetIdx < len(parts)-1 && (next_comb == " " || next_comb == ">")
+			pass_target_propagate := curr.TargetIdx > 0 && curr.IncomingComb == " "
+			pass_target_0 := curr.TargetIdx == 0
+
+			for _, c := range n.Children {
+				if pass_target_next {
+					task.wg.Add(1)
+					go searchDfsRecursiveConcurrent(searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb}, parts, task)
+				}
+				if pass_target_propagate {
+					task.wg.Add(1)
+					go searchDfsRecursiveConcurrent(searchState{c, curr.TargetIdx, curr.Depth + 1, " "}, parts, task)
+				}
+				if pass_target_0 {
+					task.wg.Add(1)
+					go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+				}
+			}
+
+			if matched && curr.TargetIdx < len(parts)-1 {
+				if next_comb == "+" {
+					if sibling := getNextElementSibling(n); sibling != nil {
+						task.wg.Add(1)
+						go searchDfsRecursiveConcurrent(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
+					}
+				} else if next_comb == "~" {
+					for _, sibling := range getNextElementSiblings(n) {
+						task.wg.Add(1)
+						go searchDfsRecursiveConcurrent(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
+					}
+				}
+			}
+
+		} else {
+			if curr.TargetIdx == 0 {
+				for _, c := range n.Children {
+					task.wg.Add(1)
+					go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+				}
+			}
+		}
+
+	} else {
+		for _, c := range n.Children {
+			task.wg.Add(1)
+			go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+		}
+	}
+}
+
 
 func calculateMaxDepth(n *node) int {
 	if n == nil {
@@ -748,10 +1023,10 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req_data.Algorithm == "bfs" {
-		matches, log = searchBfs(tree, parts, search_limit)
+		matches, log = searchBfsConcurrent(tree, parts, search_limit)
 	} else {
-		matches, log = searchDfs(tree, parts, search_limit)
-	}
+		matches, log = searchDfsConcurrent(tree, parts, search_limit)
+	} 
 
 	duration := time.Since(start)
 

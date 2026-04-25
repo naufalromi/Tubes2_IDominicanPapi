@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort" 
 	"strings"
 	"sync"
 	"time"
@@ -38,17 +39,19 @@ type selectorPart struct {
 }
 
 type logEntry struct {
-	Step     int    `json:"step"`
-	NodeID   string `json:"node_id"`
-	ParentID string `json:"parent_id"`
-	Depth    int    `json:"depth"`
-	Tag      string `json:"tag"`
-	Action   string `json:"action"`
-	Matched  bool   `json:"matched"`
+	Step      int    `json:"step"`
+	NodeIndex int    `json:"-"`
+	NodeID    string `json:"node_id"`
+	ParentID  string `json:"parent_id"`
+	Depth     int    `json:"depth"`
+	Tag       string `json:"tag"`
+	Action    string `json:"action"`
+	Matched   bool   `json:"matched"`
 }
 
 type matchInfo struct {
 	NodeID      string            `json:"node_id"`
+	NodeIndex   int               `json:"-"` 
 	Tag         string            `json:"tag"`
 	Attributes  map[string]string `json:"attributes"`
 	TextPreview string            `json:"text_preview"`
@@ -104,8 +107,8 @@ type searchRequest struct {
 }
 
 type searchTask struct {
-	mu      sync.Mutex 
-	wg      sync.WaitGroup 
+	mu      sync.Mutex
+	wg      sync.WaitGroup
 	visited map[string]bool
 	results []matchInfo
 	log     []logEntry
@@ -204,7 +207,14 @@ func buildDomTree(html_content string) *node {
 			parent.Children = append(parent.Children, new_node)
 
 			if tag == "script" || tag == "style" {
-				for tokenizer.Next() != html.EndTagToken || strings.ToLower(tokenizer.Token().Data) != tag {
+				for {
+					next_tt := tokenizer.Next()
+					if next_tt == html.ErrorToken {
+						break
+					}
+					if next_tt == html.EndTagToken && strings.ToLower(tokenizer.Token().Data) == tag {
+						break
+					}
 				}
 				continue
 			}
@@ -230,6 +240,7 @@ func buildDomTree(html_content string) *node {
 			parent := stack[len(stack)-1]
 			text_node := &node{
 				ID:         generate_id(),
+				Index:      node_counter - 1,
 				TagName:    "#text",
 				Data:       text_data,
 				Attributes: make(map[string]string),
@@ -243,6 +254,7 @@ func buildDomTree(html_content string) *node {
 			parent := stack[len(stack)-1]
 			comment_node := &node{
 				ID:         generate_id(),
+				Index:      node_counter - 1,
 				TagName:    "#comment",
 				Data:       comment_data,
 				Attributes: make(map[string]string),
@@ -302,6 +314,10 @@ func parseSingleToken(token string, comb string) (selectorPart, error) {
 	original_token := token
 
 	re_attr := regexp.MustCompile(`\[([a-zA-Z0-9_-]+)=([^\]]+)\]`)
+	for _, m := range re_attr.FindAllStringSubmatch(token, -1) {
+		cleaned_val := strings.Trim(m[2], `"'`) 
+		part.Attributes[m[1]] = cleaned_val
+	}
 	token = re_attr.ReplaceAllString(token, "")
 
 	re_id := regexp.MustCompile(`#([a-zA-Z0-9_-]+)`)
@@ -437,98 +453,7 @@ func getNodePath(n *node) []pathNode {
 	return path
 }
 
-func searchBfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
-	results := make([]matchInfo, 0)
-	log := make([]logEntry, 0)
-	step := 0
-	visited := make(map[string]bool)
-
-	queue := []searchState{{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}}
-
-	for len(queue) > 0 {
-		if limit > 0 && len(results) >= limit {
-			break
-		}
-
-		curr := queue[0]
-		queue = queue[1:]
-		n := curr.Node
-
-		state_key := fmt.Sprintf("%s_%d", n.ID, curr.TargetIdx)
-		if visited[state_key] {
-			continue
-		}
-		visited[state_key] = true
-
-		if n.TagName != "#document" {
-			step++
-			matched := matchIdentity(n, parts[curr.TargetIdx])
-			action := "visit"
-
-			if matched && curr.TargetIdx == len(parts)-1 {
-				action = "MATCH FOUND"
-			} else if matched {
-				action = fmt.Sprintf("match part %d", curr.TargetIdx)
-			}
-
-			parent_id := ""
-			if n.Parent != nil {
-				parent_id = n.Parent.ID
-			}
-
-			log = append(log, logEntry{step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
-
-			if action == "MATCH FOUND" {
-				results = append(results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
-			}
-
-			if n.TagName != "#text" && n.TagName != "#comment" {
-				if matched && curr.TargetIdx < len(parts)-1 {
-					next_comb := parts[curr.TargetIdx+1].Combinator
-					if next_comb == " " || next_comb == ">" {
-						for _, c := range n.Children {
-							queue = append(queue, searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb})
-						}
-					} else if next_comb == "+" {
-						if sibling := getNextElementSibling(n); sibling != nil {
-							queue = append(queue, searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb})
-						}
-					} else if next_comb == "~" {
-						for _, sibling := range getNextElementSiblings(n) {
-							queue = append(queue, searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb})
-						}
-					}
-				}
-
-				if curr.TargetIdx > 0 && curr.IncomingComb == " " {
-					for _, c := range n.Children {
-						queue = append(queue, searchState{c, curr.TargetIdx, curr.Depth + 1, " "})
-					}
-				}
-
-				if curr.TargetIdx == 0 {
-					for _, c := range n.Children {
-						queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
-					}
-				}
-			} else {
-				if curr.TargetIdx == 0 {
-					for _, c := range n.Children {
-						queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
-					}
-				}
-			}
-
-		} else {
-			for _, c := range n.Children {
-				queue = append(queue, searchState{c, 0, curr.Depth + 1, ""})
-			}
-		}
-	}
-	return results, log
-}
-
-func searchBfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+func searchBFS(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
 	task := &searchTask{
 		visited: make(map[string]bool),
 		results: make([]matchInfo, 0),
@@ -600,9 +525,27 @@ func searchBfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchIn
 					}
 
 					task.mu.Lock()
-					task.log = append(task.log, logEntry{current_step, n.ID, parent_id, currState.Depth, n.TagName, action, matched})
+					task.log = append(task.log, logEntry{
+						Step:      current_step, 
+						NodeIndex: n.Index, 
+						NodeID:    n.ID, 
+						ParentID:  parent_id, 
+						Depth:     currState.Depth, 
+						Tag:       n.TagName, 
+						Action:    action, 
+						Matched:   matched,
+					})
 					if action == "MATCH FOUND" {
-						task.results = append(task.results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+						if task.limit <= 0 || len(task.results) < task.limit {
+							task.results = append(task.results, matchInfo{
+								NodeID:      n.ID, 
+								NodeIndex:   n.Index, 
+								Tag:         n.TagName, 
+								Attributes:  n.Attributes, 
+								TextPreview: extractText(n), 
+								Path:        getNodePath(n),
+							})
+						}
 					}
 					task.mu.Unlock()
 
@@ -661,111 +604,13 @@ func searchBfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchIn
 		}
 
 		wg.Wait()
-
 		queue = next_queue
 	}
 
 	return task.results, task.log
 }
 
-func searchDfs(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
-	results := make([]matchInfo, 0)
-	log := make([]logEntry, 0)
-	step := 0
-	visited := make(map[string]bool)
-
-	searchDfsRecursive(searchState{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}, parts, limit, &step, &results, &log, visited)
-	return results, log
-}
-
-func searchDfsRecursive(curr searchState, parts []selectorPart, limit int, step *int, results *[]matchInfo, log *[]logEntry, visited map[string]bool) {
-	if limit > 0 && len(*results) >= limit {
-		return
-	}
-
-	n := curr.Node
-	if n == nil {
-		return
-	}
-
-	state_key := fmt.Sprintf("%s_%d", n.ID, curr.TargetIdx)
-	if visited[state_key] {
-		return
-	}
-	visited[state_key] = true
-
-	if n.TagName != "#document" {
-		*step++
-		matched := matchIdentity(n, parts[curr.TargetIdx])
-		action := "visit"
-
-		if matched && curr.TargetIdx == len(parts)-1 {
-			action = "MATCH FOUND"
-		} else if matched {
-			action = fmt.Sprintf("match part %d", curr.TargetIdx)
-		}
-
-		parent_id := ""
-		if n.Parent != nil {
-			parent_id = n.Parent.ID
-		}
-
-		*log = append(*log, logEntry{*step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
-
-		if action == "MATCH FOUND" {
-			*results = append(*results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
-		}
-
-		if n.TagName != "#text" && n.TagName != "#comment" {
-			next_comb := ""
-			if curr.TargetIdx < len(parts)-1 {
-				next_comb = parts[curr.TargetIdx+1].Combinator
-			}
-
-			pass_target_next := matched && curr.TargetIdx < len(parts)-1 && (next_comb == " " || next_comb == ">")
-			pass_target_propagate := curr.TargetIdx > 0 && curr.IncomingComb == " "
-			pass_target_0 := curr.TargetIdx == 0
-
-			for _, c := range n.Children {
-				if pass_target_next {
-					searchDfsRecursive(searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb}, parts, limit, step, results, log, visited)
-				}
-				if pass_target_propagate {
-					searchDfsRecursive(searchState{c, curr.TargetIdx, curr.Depth + 1, " "}, parts, limit, step, results, log, visited)
-				}
-				if pass_target_0 {
-					searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
-				}
-			}
-
-			if matched && curr.TargetIdx < len(parts)-1 {
-				if next_comb == "+" {
-					if sibling := getNextElementSibling(n); sibling != nil {
-						searchDfsRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, limit, step, results, log, visited)
-					}
-				} else if next_comb == "~" {
-					for _, sibling := range getNextElementSiblings(n) {
-						searchDfsRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, limit, step, results, log, visited)
-					}
-				}
-			}
-
-		} else {
-			if curr.TargetIdx == 0 {
-				for _, c := range n.Children {
-					searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
-				}
-			}
-		}
-
-	} else {
-		for _, c := range n.Children {
-			searchDfsRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, limit, step, results, log, visited)
-		}
-	}
-}
-
-func searchDfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
+func searchDFS(root *node, parts []selectorPart, limit int) ([]matchInfo, []logEntry) {
 	task := &searchTask{
 		visited: make(map[string]bool),
 		results: make([]matchInfo, 0),
@@ -774,14 +619,30 @@ func searchDfsConcurrent(root *node, parts []selectorPart, limit int) ([]matchIn
 	}
 
 	task.wg.Add(1)
-	go searchDfsRecursiveConcurrent(searchState{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}, parts, task)
+	go searchDFSRecursive(searchState{Node: root, TargetIdx: 0, Depth: 0, IncomingComb: ""}, parts, task)
 
 	task.wg.Wait()
+
+	sort.Slice(task.log, func(i, j int) bool {
+		if task.log[i].NodeIndex == task.log[j].NodeIndex {
+			return task.log[i].Step < task.log[j].Step
+		}
+
+		return task.log[i].NodeIndex < task.log[j].NodeIndex
+	})
+
+	for i := range task.log {
+		task.log[i].Step = i + 1
+	}
+
+	sort.Slice(task.results, func(i, j int) bool {
+		return task.results[i].NodeIndex < task.results[j].NodeIndex
+	})
 
 	return task.results, task.log
 }
 
-func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *searchTask) {
+func searchDFSRecursive(curr searchState, parts []selectorPart, task *searchTask) {
 	defer task.wg.Done() 
 
 	task.mu.Lock()
@@ -827,9 +688,27 @@ func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *
 		}
 
 		task.mu.Lock()
-		task.log = append(task.log, logEntry{current_step, n.ID, parent_id, curr.Depth, n.TagName, action, matched})
+		task.log = append(task.log, logEntry{
+			Step:      current_step, 
+			NodeIndex: n.Index,
+			NodeID:    n.ID, 
+			ParentID:  parent_id, 
+			Depth:     curr.Depth, 
+			Tag:       n.TagName, 
+			Action:    action, 
+			Matched:   matched,
+		})
 		if action == "MATCH FOUND" {
-			task.results = append(task.results, matchInfo{n.ID, n.TagName, n.Attributes, extractText(n), getNodePath(n)})
+			if task.limit <= 0 || len(task.results) < task.limit {
+				task.results = append(task.results, matchInfo{
+					NodeID:      n.ID, 
+					NodeIndex:   n.Index, 
+					Tag:         n.TagName, 
+					Attributes:  n.Attributes, 
+					TextPreview: extractText(n), 
+					Path:        getNodePath(n),
+				})
+			}
 		}
 		task.mu.Unlock()
 
@@ -846,15 +725,15 @@ func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *
 			for _, c := range n.Children {
 				if pass_target_next {
 					task.wg.Add(1)
-					go searchDfsRecursiveConcurrent(searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb}, parts, task)
+					go searchDFSRecursive(searchState{c, curr.TargetIdx + 1, curr.Depth + 1, next_comb}, parts, task)
 				}
 				if pass_target_propagate {
 					task.wg.Add(1)
-					go searchDfsRecursiveConcurrent(searchState{c, curr.TargetIdx, curr.Depth + 1, " "}, parts, task)
+					go searchDFSRecursive(searchState{c, curr.TargetIdx, curr.Depth + 1, " "}, parts, task)
 				}
 				if pass_target_0 {
 					task.wg.Add(1)
-					go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+					go searchDFSRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
 				}
 			}
 
@@ -862,12 +741,12 @@ func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *
 				if next_comb == "+" {
 					if sibling := getNextElementSibling(n); sibling != nil {
 						task.wg.Add(1)
-						go searchDfsRecursiveConcurrent(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
+						go searchDFSRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
 					}
 				} else if next_comb == "~" {
 					for _, sibling := range getNextElementSiblings(n) {
 						task.wg.Add(1)
-						go searchDfsRecursiveConcurrent(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
+						go searchDFSRecursive(searchState{sibling, curr.TargetIdx + 1, curr.Depth, next_comb}, parts, task)
 					}
 				}
 			}
@@ -876,7 +755,7 @@ func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *
 			if curr.TargetIdx == 0 {
 				for _, c := range n.Children {
 					task.wg.Add(1)
-					go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+					go searchDFSRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
 				}
 			}
 		}
@@ -884,11 +763,10 @@ func searchDfsRecursiveConcurrent(curr searchState, parts []selectorPart, task *
 	} else {
 		for _, c := range n.Children {
 			task.wg.Add(1)
-			go searchDfsRecursiveConcurrent(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
+			go searchDFSRecursive(searchState{c, 0, curr.Depth + 1, ""}, parts, task)
 		}
 	}
 }
-
 
 func calculateMaxDepth(n *node) int {
 	if n == nil {
@@ -1029,14 +907,29 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	search_limit := 0
 	if req_data.ResultMode == "top_n" {
+		if req_data.Limit <= 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Limit harus berupa angka positif lebih dari 0 pada mode top_n",
+			})
+			return
+		}
 		search_limit = req_data.Limit
 	}
 
 	if req_data.Algorithm == "bfs" {
-		matches, log = searchBfsConcurrent(tree, parts, search_limit)
+		matches, log = searchBFS(tree, parts, search_limit)
+	} else if req_data.Algorithm == "dfs" {
+		matches, log = searchDFS(tree, parts, search_limit)
 	} else {
-		matches, log = searchDfsConcurrent(tree, parts, search_limit)
-	} 
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Algoritma penelusuran dfs atau bfs",
+		})
+		return
+	}
 
 	duration := time.Since(start)
 
@@ -1044,6 +937,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range log {
 		traversal_path = append(traversal_path, entry.NodeID)
 	}
+
+	unique_visited := make(map[string]bool)
+	for _, entry := range log {
+		unique_visited[entry.NodeID] = true
+	}
+
+	total_visited := len(unique_visited) + 1
 
 	var res_tree *node
 	if req_data.IncludeTree {
@@ -1063,9 +963,9 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		ResultMode: req_data.ResultMode,
 		Limit:      req_data.Limit,
 		Stats: searchStats{
-			VisitedNodes: len(log),
+			VisitedNodes: total_visited, 
 			MatchedNodes: len(matches),
-			MaxDepth:     calculateMaxDepth(tree),
+			MaxDepth:     calculateMaxDepth(tree) - 1, 
 			SearchTimeMS: float64(duration.Microseconds()) / 1000.0,
 		},
 		Matches:       matches,
@@ -1073,8 +973,6 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		DOMTree:       res_tree,
 		TraversalLog:  res_log,
 	}
-
-	// preprocessLCA(tree)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)

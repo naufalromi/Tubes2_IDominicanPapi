@@ -202,7 +202,14 @@ func buildDomTree(html_content string) *node {
 			parent.Children = append(parent.Children, new_node)
 
 			if tag == "script" || tag == "style" {
-				for tokenizer.Next() != html.EndTagToken || strings.ToLower(tokenizer.Token().Data) != tag {
+				for {
+					next_tt := tokenizer.Next()
+					if next_tt == html.ErrorToken {
+						break
+					}
+					if next_tt == html.EndTagToken && strings.ToLower(tokenizer.Token().Data) == tag {
+						break
+					}
 				}
 				continue
 			}
@@ -519,14 +526,16 @@ func searchBFS(root *node, parts []selectorPart, limit int) ([]matchInfo, []logE
 						Matched:   matched,
 					})
 					if action == "MATCH FOUND" {
-						task.results = append(task.results, matchInfo{
-							NodeID:      n.ID, 
-							NodeIndex:   n.Index, 
-							Tag:         n.TagName, 
-							Attributes:  n.Attributes, 
-							TextPreview: extractText(n), 
-							Path:        getNodePath(n),
-						})
+						if task.limit <= 0 || len(task.results) < task.limit {
+							task.results = append(task.results, matchInfo{
+								NodeID:      n.ID, 
+								NodeIndex:   n.Index, 
+								Tag:         n.TagName, 
+								Attributes:  n.Attributes, 
+								TextPreview: extractText(n), 
+								Path:        getNodePath(n),
+							})
+						}
 					}
 					task.mu.Unlock()
 
@@ -680,14 +689,16 @@ func searchDFSRecursive(curr searchState, parts []selectorPart, task *searchTask
 			Matched:   matched,
 		})
 		if action == "MATCH FOUND" {
-			task.results = append(task.results, matchInfo{
-				NodeID:      n.ID, 
-				NodeIndex:   n.Index, 
-				Tag:         n.TagName, 
-				Attributes:  n.Attributes, 
-				TextPreview: extractText(n), 
-				Path:        getNodePath(n),
-			})
+			if task.limit <= 0 || len(task.results) < task.limit {
+				task.results = append(task.results, matchInfo{
+					NodeID:      n.ID, 
+					NodeIndex:   n.Index, 
+					Tag:         n.TagName, 
+					Attributes:  n.Attributes, 
+					TextPreview: extractText(n), 
+					Path:        getNodePath(n),
+				})
+			}
 		}
 		task.mu.Unlock()
 
@@ -886,14 +897,29 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	search_limit := 0
 	if req_data.ResultMode == "top_n" {
+		if req_data.Limit <= 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Limit harus berupa angka positif lebih dari 0 pada mode top_n",
+			})
+			return
+		}
 		search_limit = req_data.Limit
 	}
 
 	if req_data.Algorithm == "bfs" {
 		matches, log = searchBFS(tree, parts, search_limit)
-	} else {
+	} else if req_data.Algorithm == "dfs" {
 		matches, log = searchDFS(tree, parts, search_limit)
-	} 
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Algoritma penelusuran dfs atau bfs",
+		})
+		return
+	}
 
 	duration := time.Since(start)
 
@@ -901,6 +927,13 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	for _, entry := range log {
 		traversal_path = append(traversal_path, entry.NodeID)
 	}
+
+	unique_visited := make(map[string]bool)
+	for _, entry := range log {
+		unique_visited[entry.NodeID] = true
+	}
+
+	total_visited := len(unique_visited) + 1
 
 	var res_tree *node
 	if req_data.IncludeTree {
@@ -920,9 +953,9 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		ResultMode: req_data.ResultMode,
 		Limit:      req_data.Limit,
 		Stats: searchStats{
-			VisitedNodes: len(log),
+			VisitedNodes: total_visited, 
 			MatchedNodes: len(matches),
-			MaxDepth:     calculateMaxDepth(tree),
+			MaxDepth:     calculateMaxDepth(tree) - 1, 
 			SearchTimeMS: float64(duration.Microseconds()) / 1000.0,
 		},
 		Matches:       matches,

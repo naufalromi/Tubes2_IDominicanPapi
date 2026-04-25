@@ -1,53 +1,76 @@
 <!DOCTYPE html>
-<html>
-  <body class="theme-dark admin-panel">
-
-    <header id="topbar">
-      <div class="logo">MyApp</div>
-      <nav class="menu">
-        <ul>
-          <li class="item active"><a href="#">Home</a></li>
-          <li class="item"><a href="#">Dashboard</a></li>
-          <li class="item"><a href="#">Settings</a></li>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Toko Online Kompleks</title>
+</head>
+<body class="theme-light page-product">
+    <nav id="navbar" class="top-nav shadow">
+        <ul class="nav-list">
+            <li class="nav-item"><a href="/home">Beranda</a></li>
+            <li class="nav-item active"><a href="/products">Produk</a></li>
+            <li class="nav-item has-dropdown">
+                <a href="/categories">Kategori</a>
+                <ul class="dropdown-menu">
+                    <li><a href="/cat/elektronik" data-id="cat-1">Elektronik</a></li>
+                    <li><a href="/cat/pakaian" data-id="cat-2" class="highlight">Pakaian</a></li>
+                </ul>
+            </li>
         </ul>
-      </nav>
-    </header>
+    </nav>
 
-    <main id="main-content">
-      
-      <section class="dashboard">
-        <h2>Dashboard</h2>
+    <main id="main-content" class="container">
+        <header class="page-header">
+            <h1 class="title main-title" data-seo="header">Laptop Gaming Super X</h1>
+            <p class="subtitle">Performa maksimal untuk gamer sejati.</p>
+            <hr>
+        </header>
 
-        <div class="cards">
-          <div class="card">
-            <span class="badge role-admin" data-role="admin">Admin</span>
-            <p>User management panel</p>
-          </div>
+        <section class="product-details">
+            <div class="gallery">
+                <img src="img1.jpg" alt="Tampak Depan" class="img-fluid active">
+                <img src="img2.jpg" alt="Tampak Samping" class="img-fluid">
+            </div>
 
-          <div class="card">
-            <span class="badge role-user" data-role="user">User</span>
-            <p>General access</p>
-          </div>
+            <div class="info-panel">
+                <div class="price-box">
+                    <span class="currency">Rp</span>
+                    <del class="old-price">25.000.000</del>
+                    <span class="new-price highlight">20.000.000</span>
+                </div>
 
-          <div class="card">
-            <span class="badge role-admin" data-role="admin">Super Admin</span>
-            <p>Full control</p>
-          </div>
-        </div>
-      </section>
+                <form id="add-to-cart-form" class="form-buy">
+                    <div class="form-group">
+                        <label for="color-select">Warna</label>
+                        <select id="color-select" name="color">
+                            <option value="hitam">Hitam</option>
+                            <option value="putih" class="out-of-stock">Putih (Habis)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group action-buttons">
+                        <button type="button" class="btn btn-outline" data-action="wishlist">Wishlist</button>
+                        <input type="number" value="1" min="1" class="qty-input">
+                        <button type="submit" class="btn btn-primary buy-btn" data-action="buy">Beli Sekarang</button>
+                    </div>
+                </form>
+            </div>
+        </section>
 
-      <section class="logs">
-        <h3>Logs</h3>
-        <div class="log-item">Login success</div>
-        <div class="log-item">Permission updated</div>
-        <div class="log-item highlight">Critical update</div>
-      </section>
-
+        <section class="reviews">
+            <h2>Ulasan Pembeli</h2>
+            <ul class="review-list">
+                <li class="review-item" data-rating="5">
+                    <span class="user">Budi</span>
+                    <p class="comment">Mantap banget laptopnya!</p>
+                </li>
+                <li class="review-item" data-rating="4">
+                    <span class="user">Siti</span>
+                    <p class="comment">Bagus, tapi pengiriman agak lama.</p>
+                    <span class="date">Kemarin</span>
+                </li>
+            </ul>
+        </section>
     </main>
-
-    <footer>
-      <span class="badge">v1.0.0</span>
-    </footer>
-
-  </body>
+</body>
 </html>

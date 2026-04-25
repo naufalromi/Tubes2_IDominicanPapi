@@ -171,9 +171,10 @@ export function adaptTraversalResponse(response: BackendSearchResponse): Travers
   const tree = response.dom_tree ? adaptDomNode(response.dom_tree) : null
   const matches = adaptMatches(tree, response.matches)
   const logs = adaptLogs(tree, response.traversal_log)
+  const treeMaxDepth = getMaxDepth(tree)
 
   const stats: TraversalStats = {
-    maxDepth: response.stats.max_depth || getMaxDepth(tree),
+    maxDepth: treeMaxDepth || Math.max(response.stats.max_depth - 1, 0),
     nodesVisited: response.stats.visited_nodes || countNodes(tree),
     traversalTimeMs: response.stats.search_time_ms,
     matchesFound: response.stats.matched_nodes || matches.length,

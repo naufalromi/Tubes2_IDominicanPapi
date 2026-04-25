@@ -206,19 +206,6 @@ func buildDomTree(html_content string) *node {
 
 			parent.Children = append(parent.Children, new_node)
 
-			if tag == "script" || tag == "style" {
-				for {
-					next_tt := tokenizer.Next()
-					if next_tt == html.ErrorToken {
-						break
-					}
-					if next_tt == html.EndTagToken && strings.ToLower(tokenizer.Token().Data) == tag {
-						break
-					}
-				}
-				continue
-			}
-
 			if !void_tags[tag] && tt != html.SelfClosingTagToken {
 				stack = append(stack, new_node)
 			}
@@ -424,7 +411,7 @@ func extractText(n *node) string {
 		for _, c := range current_node.Children {
 			if c.TagName == "#text" {
 				text_parts = append(text_parts, c.Data)
-			} else if c.TagName != "#comment" && c.TagName != "script" && c.TagName != "style" {
+			} else if c.TagName != "#comment" {
 				extract(c)
 			}
 		}

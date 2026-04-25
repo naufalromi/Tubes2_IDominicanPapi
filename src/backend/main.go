@@ -151,31 +151,20 @@ func fetchHtml(target_url string) (string, error) {
 func buildDomTree(html_content string) *node {
 	reader := strings.NewReader(html_content)
 	tokenizer := html.NewTokenizer(reader)
-
-	node_counter := 0
-	generate_id := func() string {
-		node_counter++
-		return fmt.Sprintf("n%d", node_counter)
+	nodeCounter := 0
+	generateID := func() string {
+		nodeCounter++
+		return fmt.Sprintf("n%d", nodeCounter)
 	}
-
 	root := &node{
-		ID:       generate_id(),
-		Index:    node_counter - 1,
+		ID:       generateID(),
+		Index:    nodeCounter - 1,
 		TagName:  "#document",
 		Children: []*node{},
 	}
-
 	stack := []*node{root}
-
-	auto_close := func(tag string) {
-		for len(stack) > 1 {
-			top := stack[len(stack)-1]
-			if (top.TagName == "li" && tag == "li") || (top.TagName == "p" && !isInline(tag)) {
-				stack = stack[:len(stack)-1]
-				continue
-			}
-			break
-		}
+	currentParent := func() *node {
+		return stack[len(stack)-1]
 	}
 
 	for {
@@ -188,39 +177,23 @@ func buildDomTree(html_content string) *node {
 		switch tt {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			tag := strings.ToLower(token.Data)
-			auto_close(tag)
 
-			parent := stack[len(stack)-1]
-			new_node := &node{
-				ID:         generate_id(),
-				Index:      node_counter - 1,
+			parent := currentParent()
+
+			newNode := &node{
+				ID:         generateID(),
+				Index:      nodeCounter - 1,
 				TagName:    tag,
 				Attributes: make(map[string]string),
 				Children:   []*node{},
 				Parent:     parent,
 			}
-
 			for _, attr := range token.Attr {
-				new_node.Attributes[attr.Key] = attr.Val
+				newNode.Attributes[attr.Key] = attr.Val
 			}
-
-			parent.Children = append(parent.Children, new_node)
-
-			if tag == "script" || tag == "style" {
-				for {
-					next_tt := tokenizer.Next()
-					if next_tt == html.ErrorToken {
-						break
-					}
-					if next_tt == html.EndTagToken && strings.ToLower(tokenizer.Token().Data) == tag {
-						break
-					}
-				}
-				continue
-			}
-
+			parent.Children = append(parent.Children, newNode)
 			if !void_tags[tag] && tt != html.SelfClosingTagToken {
-				stack = append(stack, new_node)
+				stack = append(stack, newNode)
 			}
 
 		case html.EndTagToken:
@@ -233,37 +206,37 @@ func buildDomTree(html_content string) *node {
 			}
 
 		case html.TextToken:
-			text_data := strings.TrimSpace(token.Data)
-			if text_data == "" {
+			text := strings.TrimSpace(token.Data)
+			if text == "" {
 				continue
 			}
-			parent := stack[len(stack)-1]
-			text_node := &node{
-				ID:         generate_id(),
-				Index:      node_counter - 1,
+			parent := currentParent()
+			textNode := &node{
+				ID:         generateID(),
+				Index:      nodeCounter - 1,
 				TagName:    "#text",
-				Data:       text_data,
+				Data:       text,
 				Attributes: make(map[string]string),
 				Children:   []*node{},
 				Parent:     parent,
 			}
-			parent.Children = append(parent.Children, text_node)
+			parent.Children = append(parent.Children, textNode)
 
 		case html.CommentToken:
-			comment_data := token.Data
-			parent := stack[len(stack)-1]
-			comment_node := &node{
-				ID:         generate_id(),
-				Index:      node_counter - 1,
+			parent := currentParent()
+			commentNode := &node{
+				ID:         generateID(),
+				Index:      nodeCounter - 1,
 				TagName:    "#comment",
-				Data:       comment_data,
+				Data:       token.Data,
 				Attributes: make(map[string]string),
 				Children:   []*node{},
 				Parent:     parent,
 			}
-			parent.Children = append(parent.Children, comment_node)
+			parent.Children = append(parent.Children, commentNode)
 		}
 	}
+
 	return root
 }
 

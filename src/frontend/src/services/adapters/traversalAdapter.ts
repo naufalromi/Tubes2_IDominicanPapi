@@ -14,7 +14,13 @@ import type {
   TraversalStats,
 } from '../../types/traversal'
 import { formatNodeLabel, truncateText } from '../../utils/format'
-import { buildNodePath, countNodes, findNodeById, getMaxDepth } from '../../utils/tree'
+import {
+  buildNodePath,
+  countNodes,
+  findNodeById,
+  flattenTree,
+  getMaxDepth,
+} from '../../utils/tree'
 
 function buildDomNodeLabel(node: Pick<BackendDomNode, 'tag' | 'attributes' | 'data'>): string {
   if (node.tag === '#document') {
@@ -112,7 +118,8 @@ function adaptLogs(
   tree: DomNode | null,
   logs: BackendSearchResponse['traversal_log'],
 ): TraversalLogEntry[] {
-  return (logs ?? []).map((entry) => {
+  const backendLogs = logs ?? []
+  const adaptedLogs = backendLogs.map((entry) => {
     const node = findNodeById(tree, entry.node_id)
     const nodeLabel = node?.label ?? formatNodeLabel(entry.tag)
     const path = resolveNodePath(tree, entry.node_id)
@@ -126,6 +133,21 @@ function adaptLogs(
       message: buildLogMessage(entry, nodeLabel, path),
     }
   })
+
+  const visitedNodeIds = new Set(backendLogs.map((entry) => entry.node_id))
+  const lastStep = backendLogs.reduce((maxStep, entry) => Math.max(maxStep, entry.step), 0)
+  const skippedLogs = flattenTree(tree)
+    .filter((node) => node.tag !== '#document' && !visitedNodeIds.has(node.id))
+    .map((node, index): TraversalLogEntry => ({
+      id: `${node.id}-skip`,
+      step: lastStep + index + 1,
+      nodeId: node.id,
+      nodeLabel: node.label,
+      action: 'skip',
+      message: `Skipped ${node.label}; it was not visited during this traversal.`,
+    }))
+
+  return [...adaptedLogs, ...skippedLogs]
 }
 
 export function adaptTraversalRequest(request: TraversalRequest): BackendSearchRequest {

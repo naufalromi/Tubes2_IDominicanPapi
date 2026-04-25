@@ -46,7 +46,7 @@ function TraversalLogItem({ entry }: TraversalLogItemProps) {
         }}
       >
         <div style={{ fontWeight: 600, color: 'white', fontSize: '14px' }}>
-          Step {entry.step}
+          {entry.action === 'skip' ? 'Not visited' : `Step ${entry.step}`}
         </div>
 
         <span

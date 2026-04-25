@@ -1,59 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
-<body class="theme-dark admin-panel">
-  <aside id="sidebar" class="sidebar-layout">
-    <ul class="nav-menu">
-      <li class="nav-item active" data-id="home"><a href="#">Home</a></li>
-      <li class="nav-item">
-        <a href="#">Settings</a>
-        <ul class="sub-menu">
-          <li class="sub-item"><span class="icon"></span>Profile</li>
-          <li class="sub-item target-node">Security</li>
-        </ul>
-      </li>
-    </ul>
-  </aside>
+<html>
+  <body class="theme-dark admin-panel">
 
-  <main id="main-content">
-    <header>
-      <h2>Dashboard</h2>
-      <div class="user-info">
-        <img src="avatar.png" alt="User">
-        <span class="badge role-admin" data-role="admin">Admin</span>
-      </div>
+    <header id="topbar">
+      <div class="logo">MyApp</div>
+      <nav class="menu">
+        <ul>
+          <li class="item active"><a href="#">Home</a></li>
+          <li class="item"><a href="#">Dashboard</a></li>
+          <li class="item"><a href="#">Settings</a></li>
+        </ul>
+      </nav>
     </header>
 
-    <section class="widget-grid">
-      <article class="widget data-widget" id="sales-widget">
-        <div class="widget-header"><h3>Sales</h3></div>
-        <div class="widget-body">
-          <table class="data-table">
-            <tbody>
-              <tr class="row"><td class="cell">Q1</td><td class="cell value">1500</td></tr>
-              <tr class="row highlight"><td class="cell">Q2</td><td class="cell value target-value">3200</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
+    <main id="main-content">
+      
+      <section class="dashboard">
+        <h2>Dashboard</h2>
 
-      <article class="widget form-widget">
-        <form id="config-form">
-          <div class="form-group">
-            <label>API Key</label>
-            
-            <input type="text" class="input-control hidden-key" value="secret_key">
-            <span class="help-text">Do not share this.</span>
+        <div class="cards">
+          <div class="card">
+            <span class="badge role-admin" data-role="admin">Admin</span>
+            <p>User management panel</p>
           </div>
-          
-          <div class="form-group">
-            <input type="checkbox" id="enable-logs" checked>
-            <label for="enable-logs">Enable Logging</label>
+
+          <div class="card">
+            <span class="badge role-user" data-role="user">User</span>
+            <p>General access</p>
           </div>
-          
-          <button type="submit" class="btn btn-primary" data-action="save">Save Changes</button>
-        </form>
-      </article>
-    </section>
-  </main>
-</body>
+
+          <div class="card">
+            <span class="badge role-admin" data-role="admin">Super Admin</span>
+            <p>Full control</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="logs">
+        <h3>Logs</h3>
+        <div class="log-item">Login success</div>
+        <div class="log-item">Permission updated</div>
+        <div class="log-item highlight">Critical update</div>
+      </section>
+
+    </main>
+
+    <footer>
+      <span class="badge">v1.0.0</span>
+    </footer>
+
+  </body>
 </html>

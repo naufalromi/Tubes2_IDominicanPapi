@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import Input from '../../../components/ui/Input'
 
 type TopNInputProps = {
@@ -7,16 +7,32 @@ type TopNInputProps = {
 }
 
 function TopNInput({ value, onChange }: TopNInputProps) {
+  const [displayValue, setDisplayValue] = useState(String(value))
+
+  useEffect(() => {
+    setDisplayValue(String(value))
+  }, [value])
+
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const parsedValue = Number(e.target.value)
-    onChange(Number.isNaN(parsedValue) ? 0 : parsedValue)
+    const nextValue = e.target.value
+    setDisplayValue(nextValue)
+
+    if (nextValue.trim() === '') {
+      return
+    }
+
+    const parsedValue = Number(nextValue)
+
+    if (!Number.isNaN(parsedValue)) {
+      onChange(parsedValue)
+    }
   }
 
   return (
     <Input
       label="Top N"
       type="number"
-      value={value}
+      value={displayValue}
       onChange={handleChange}
       placeholder="5"
     />
